@@ -9,3 +9,5 @@ function test_aqaml() {
 }
 
 test_aqaml "42" 42
+test_aqaml "1+2" 3
+test_aqaml "1+2+3" 6
