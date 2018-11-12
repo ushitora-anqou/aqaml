@@ -48,9 +48,9 @@ let rec generate = function
   | ast::asts ->
     begin
       match ast with
-      | Int num -> (sprintf "push $%d" num)
+      | Int num -> sprintf "mov $%d, %%rax\nsal $1, %%rax\nor $1, %%rax\npush %%rax" num
     end::generate asts
   | [] -> [];;
 
 let code = generate (parse (tokenize 0)) in
-printf ".global main\nmain:\n%s\npop %%rax\nret\n" (String.concat "\n" code);;
+printf ".global main\nmain:\n%s\npop %%rax\nsar $1, %%rax\nret\n" (String.concat "\n" code);;
