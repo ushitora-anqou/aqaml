@@ -22,7 +22,8 @@ let rec next_int i acc =
 
 type token =
   | IntLiteral of int
-  | Plus;;
+  | Plus
+  | Minus;;
 
 let rec tokenize i =
   try
@@ -31,18 +32,36 @@ let rec tokenize i =
     | '0'..'9' ->
       let (i, num) = next_int (i - 1) 0 in (IntLiteral num)::tokenize i
     | '+' -> Plus::tokenize i
+    | '-' -> Minus::tokenize i
     | _ -> failwith "unexpected char"
   with
     EOF -> [];;
 
 type ast =
   | Int of int
-  | Add of (ast * ast);;
+  | Add of (ast * ast)
+  | Sub of (ast * ast);;
 
-let rec parse = function
-  | (IntLiteral num)::Plus::tokens -> Add (Int num, parse tokens)
-  | (IntLiteral num)::[] -> Int num
-  | _ -> failwith "unexpected token";;
+let parse tokens =
+  let parse_integer = function
+    | (IntLiteral num)::tokens -> (tokens, Int num)
+    | _ -> failwith "unexpected token"
+  in
+  let parse_additive tokens =
+    let rec aux lhs = function
+      | Plus::tokens ->
+        let (tokens, rhs) = parse_integer tokens in
+        aux (Add (lhs, rhs)) tokens
+      | Minus::tokens ->
+        let (tokens, rhs) = parse_integer tokens in
+        aux (Sub (lhs, rhs)) tokens
+      | _ -> (tokens, lhs) in
+    let (tokens, ast) = parse_integer tokens in
+    aux ast tokens
+  in
+  let (_, ast) = parse_additive tokens in
+  ast
+;;
 
 let rec generate ast =
   let
@@ -54,11 +73,21 @@ let rec generate ast =
   | Add (lhs, rhs) -> String.concat "\n" [
       generate lhs;
       generate rhs;
-      "pop rax";
-      untag_int "rax";
       "pop rdi";
       untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
       "add rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Sub (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "sub rax, rdi";
       tag_int "rax";
       "push rax" ]
   | _ -> failwith "unexpected ast";;
