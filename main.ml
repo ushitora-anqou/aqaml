@@ -9,7 +9,9 @@ let program = read_line ();;
 
 exception EOF;;
 let next_char i =
-  if i < String.length program then i + 1, String.get program i else raise EOF;;
+  if i < String.length program then
+    (i + 1, String.get program i)
+  else raise EOF;;
 
 let rec next_int i acc =
   try
@@ -32,13 +34,14 @@ let rec tokenize i =
   try
     let (i, ch) = next_char i in
     match ch with
+    | ' ' | '\t' | '\n' -> tokenize i
     | '0'..'9' ->
       let (i, num) = next_int (i - 1) 0 in (IntLiteral num)::tokenize i
     | '+' -> Plus::tokenize i
     | '-' -> Minus::tokenize i
     | '*' -> Star::tokenize i
     | '/' -> Slash::tokenize i
-    | _ -> failwith "unexpected char"
+    | _ -> failwith (sprintf "unexpected char: '%c'" ch)
   with
     EOF -> [];;
 
