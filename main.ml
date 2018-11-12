@@ -23,7 +23,10 @@ let rec next_int i acc =
 type token =
   | IntLiteral of int
   | Plus
-  | Minus;;
+  | Minus
+  | Star
+  | Slash
+;;
 
 let rec tokenize i =
   try
@@ -33,6 +36,8 @@ let rec tokenize i =
       let (i, num) = next_int (i - 1) 0 in (IntLiteral num)::tokenize i
     | '+' -> Plus::tokenize i
     | '-' -> Minus::tokenize i
+    | '*' -> Star::tokenize i
+    | '/' -> Slash::tokenize i
     | _ -> failwith "unexpected char"
   with
     EOF -> [];;
@@ -40,23 +45,38 @@ let rec tokenize i =
 type ast =
   | Int of int
   | Add of (ast * ast)
-  | Sub of (ast * ast);;
+  | Sub of (ast * ast)
+  | Mul of (ast * ast)
+  | Div of (ast * ast)
+;;
 
 let parse tokens =
   let parse_integer = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
     | _ -> failwith "unexpected token"
   in
-  let parse_additive tokens =
-    let rec aux lhs = function
-      | Plus::tokens ->
+  let parse_multiplicative tokens =
+    let rec aux lhs tokens = match tokens with
+      | Star::tokens ->
         let (tokens, rhs) = parse_integer tokens in
-        aux (Add (lhs, rhs)) tokens
-      | Minus::tokens ->
+        aux (Mul (lhs, rhs)) tokens
+      | Slash::tokens ->
         let (tokens, rhs) = parse_integer tokens in
-        aux (Sub (lhs, rhs)) tokens
+        aux (Div (lhs, rhs)) tokens
       | _ -> (tokens, lhs) in
     let (tokens, ast) = parse_integer tokens in
+    aux ast tokens
+  in
+  let parse_additive tokens =
+    let rec aux lhs tokens = match tokens with
+      | Plus::tokens ->
+        let (tokens, rhs) = parse_multiplicative tokens in
+        aux (Add (lhs, rhs)) tokens
+      | Minus::tokens ->
+        let (tokens, rhs) = parse_multiplicative tokens in
+        aux (Sub (lhs, rhs)) tokens
+      | _ -> (tokens, lhs) in
+    let (tokens, ast) = parse_multiplicative tokens in
     aux ast tokens
   in
   let (_, ast) = parse_additive tokens in
@@ -88,6 +108,27 @@ let rec generate ast =
       "pop rax";
       untag_int "rax";
       "sub rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Mul (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "imul rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Div (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "cqo";
+      "idiv rdi";
       tag_int "rax";
       "push rax" ]
   | _ -> failwith "unexpected ast";;
