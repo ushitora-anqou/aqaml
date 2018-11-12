@@ -46,19 +46,22 @@ let rec parse = function
 
 let rec generate ast =
   let
-    tag_int reg = sprintf "sal $1, %s\nor $1, %s" reg reg
-  and untag_int reg = sprintf "sar $1, %s" reg
+    tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg and
+  untag_int reg = sprintf "sar %s, 1" reg
   in
   match ast with
-  | Int num -> sprintf "mov $%d, %%rax\n%s\npush %%rax" num (tag_int "%rax")
+  | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
   | Add (lhs, rhs) -> String.concat "\n" [
-      generate lhs; generate rhs;
-      "pop %rax"; untag_int "%rax";
-      "pop %rdi"; untag_int "%rdi";
-      "add %rdi, %rax";
-      tag_int "%rax";
-      "push %rax" ]
+      generate lhs;
+      generate rhs;
+      "pop rax";
+      untag_int "rax";
+      "pop rdi";
+      untag_int "rdi";
+      "add rax, rdi";
+      tag_int "rax";
+      "push rax" ]
   | _ -> failwith "unexpected ast";;
 
 let code = generate (parse (tokenize 0)) in
-printf ".global main\nmain:\n%s\npop %%rax\nsar $1, %%rax\nret\n" code;;
+printf ".intel_syntax noprefix\n.global main\nmain:\n%s\npop rax\nsar rax, 1\nret\n" code;;
