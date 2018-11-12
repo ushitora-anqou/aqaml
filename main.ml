@@ -33,7 +33,24 @@ let rec tokenize i =
   with
     EOF -> [];;
 
-let tokens = tokenize 0 in
-match List.nth tokens 0 with
-| IntLiteral num ->
-  printf ".global main\nmain:\n\tmov $%d, %%eax\n\tret\n" num;;
+type ast =
+  | Int of int;;
+
+let rec parse = function
+  | token::tokens ->
+    begin
+      match token with
+      | IntLiteral num -> Int num
+    end::parse tokens
+  | [] -> [];;
+
+let rec generate = function
+  | ast::asts ->
+    begin
+      match ast with
+      | Int num -> (sprintf "push $%d" num)
+    end::generate asts
+  | [] -> [];;
+
+let code = generate (parse (tokenize 0)) in
+printf ".global main\nmain:\n%s\npop %%rax\nret\n" (String.concat "\n" code);;
