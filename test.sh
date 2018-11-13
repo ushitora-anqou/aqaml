@@ -19,4 +19,7 @@ test_aqaml "1 + 2 * 3" 7
 test_aqaml "2 * 3 + 1" 7
 test_aqaml "1 + 2 * 3" 7
 test_aqaml "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1" 10
-
+test_aqaml "pi" 3
+test_aqaml "pi*2" 6
+test_aqaml "pi+2" 5
+test_aqaml "10-pi" 7

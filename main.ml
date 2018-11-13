@@ -7,36 +7,50 @@ let digit x = match x with
 
 let program = read_line ();;
 
-exception EOF;;
-let next_char i =
-  if i < String.length program then
-    (i + 1, String.get program i)
-  else raise EOF;;
-
-let rec next_int i acc =
-  try
-    let (i, ch) = next_char i in
-    match ch with
-    | '0'..'9' -> next_int i (acc * 10 + digit ch)
-    | _ -> (i - 1, acc)
-  with
-    EOF -> (i, acc);;
-
 type token =
   | IntLiteral of int
   | Plus
   | Minus
   | Star
   | Slash
+  | Ident of string
 ;;
 
+exception EOF;;
+
 let rec tokenize i =
+  let next_char i =
+    if i < String.length program then
+      (i + 1, String.get program i)
+    else raise EOF in
+  let rec next_int i acc =
+    try
+      let (i, ch) = next_char i in
+      match ch with
+      | '0'..'9' -> next_int i (acc * 10 + digit ch)
+      | _ -> (i - 1, acc)
+    with
+      EOF -> (i, acc) in
+  let next_ident i =
+    let buf = Buffer.create 5 in
+    let rec aux i =
+      try
+        let (i, ch) = next_char i in
+        match ch with
+        | 'a'..'z' | 'A'..'Z' | '0'..'9' | '\'' -> Buffer.add_char buf ch; aux i
+        | _ -> (i - 1, Buffer.contents buf)
+      with
+        EOF -> (i, Buffer.contents buf) in
+    aux i in
+
   try
     let (i, ch) = next_char i in
     match ch with
     | ' ' | '\t' | '\n' -> tokenize i
     | '0'..'9' ->
       let (i, num) = next_int (i - 1) 0 in (IntLiteral num)::tokenize i
+    | 'a'..'z' | 'A'..'Z' ->
+      let (i, str) = next_ident (i - 1) in (Ident str)::tokenize i
     | '+' -> Plus::tokenize i
     | '-' -> Minus::tokenize i
     | '*' -> Star::tokenize i
@@ -51,23 +65,25 @@ type ast =
   | Sub of (ast * ast)
   | Mul of (ast * ast)
   | Div of (ast * ast)
+  | Var of (string * int option)
 ;;
 
 let parse tokens =
-  let parse_integer = function
+  let parse_primary = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
+    | (Ident id)::tokens -> (tokens, Var (id, None))
     | _ -> failwith "unexpected token"
   in
   let parse_multiplicative tokens =
     let rec aux lhs tokens = match tokens with
       | Star::tokens ->
-        let (tokens, rhs) = parse_integer tokens in
+        let (tokens, rhs) = parse_primary tokens in
         aux (Mul (lhs, rhs)) tokens
       | Slash::tokens ->
-        let (tokens, rhs) = parse_integer tokens in
+        let (tokens, rhs) = parse_primary tokens in
         aux (Div (lhs, rhs)) tokens
       | _ -> (tokens, lhs) in
-    let (tokens, ast) = parse_integer tokens in
+    let (tokens, ast) = parse_primary tokens in
     aux ast tokens
   in
   let parse_additive tokens =
@@ -84,6 +100,21 @@ let parse tokens =
   in
   let (_, ast) = parse_additive tokens in
   ast
+;;
+
+type environment = { symbols : (string, ast) Hashtbl.t };;
+let analyze ast =
+  let rec aux env ast =
+    match ast with
+    | Int _ -> ast
+    | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
+    | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
+    | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
+    | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
+    | Var (name, _) -> Hashtbl.find env.symbols name in
+  let env = {symbols = Hashtbl.create 16} in
+  Hashtbl.add env.symbols "pi" (Var ("pi", Some (-8)));
+  aux env ast
 ;;
 
 let rec generate ast =
@@ -134,7 +165,23 @@ let rec generate ast =
       "idiv rdi";
       tag_int "rax";
       "push rax" ]
+  | Var (_, Some offset) -> String.concat "\n" [
+      sprintf "mov rax, [rbp + %d]" offset;
+      "push rax" ]
   | _ -> failwith "unexpected ast";;
 
-let code = generate (parse (tokenize 0)) in
-printf ".intel_syntax noprefix\n.global main\nmain:\n%s\npop rax\nsar rax, 1\nret\n" code;;
+let code = generate (analyze (parse (tokenize 0))) in
+print_string (String.concat "\n" [
+    ".intel_syntax noprefix";
+    ".global main";
+    "main:";
+    "mov rbp, rsp";
+    "sub rsp, 64";
+    "mov rax, 7";
+    "mov [rbp - 8], rax";
+    code;
+    "pop rax";
+    "sar rax, 1";
+    "mov rsp, rbp";
+    "ret\n";
+  ]);;
