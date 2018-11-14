@@ -26,3 +26,8 @@ test_aqaml "pi" 3
 test_aqaml "pi*2" 6
 test_aqaml "pi+2" 5
 test_aqaml "10-pi" 7
+test_aqaml "id 10" 10
+test_aqaml "id (id 10)" 10
+test_aqaml "1 + id 2 + 3" 6
+test_aqaml "add1 2 * 3" 9
+test_aqaml "add1 (2 * 3)" 7

@@ -70,10 +70,12 @@ type ast =
   | Mul of (ast * ast)
   | Div of (ast * ast)
   | Var of (string * int option)
+  | FuncCall of (ast * ast)
 ;;
 
 let parse tokens =
-  let rec parse_primary = function
+  let rec
+    parse_primary = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
     | (Ident id)::tokens -> (tokens, Var (id, None))
     | LParen::tokens ->
@@ -84,16 +86,25 @@ let parse tokens =
       end
     | _ -> failwith "unexpected token"
   and
+    parse_funccall tokens =
+    let rec aux func tokens = match tokens with
+      | (IntLiteral _ | Ident _ | LParen)::_ ->
+        let (tokens, arg) = parse_primary tokens in
+        aux (FuncCall (func, arg)) tokens
+      | _ -> (tokens, func) in
+    let (tokens, ast) = parse_primary tokens in
+    aux ast tokens
+  and
     parse_multiplicative tokens =
     let rec aux lhs tokens = match tokens with
       | Star::tokens ->
-        let (tokens, rhs) = parse_primary tokens in
+        let (tokens, rhs) = parse_funccall tokens in
         aux (Mul (lhs, rhs)) tokens
       | Slash::tokens ->
-        let (tokens, rhs) = parse_primary tokens in
+        let (tokens, rhs) = parse_funccall tokens in
         aux (Div (lhs, rhs)) tokens
       | _ -> (tokens, lhs) in
-    let (tokens, ast) = parse_primary tokens in
+    let (tokens, ast) = parse_funccall tokens in
     aux ast tokens
   and
     parse_additive tokens =
@@ -123,9 +134,12 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var (name, _) -> Hashtbl.find env.symbols name in
+    | Var (name, _) -> Hashtbl.find env.symbols name
+    | FuncCall (func, arg) -> FuncCall (aux env func, aux env arg) in
   let env = {symbols = Hashtbl.create 16} in
   Hashtbl.add env.symbols "pi" (Var ("pi", Some (-8)));
+  Hashtbl.add env.symbols "id" (Var ("id", Some (-16)));
+  Hashtbl.add env.symbols "add1" (Var ("add1", Some (-24)));
   aux env ast
 ;;
 
@@ -180,17 +194,33 @@ let rec generate ast =
   | Var (_, Some offset) -> String.concat "\n" [
       sprintf "mov rax, [rbp + %d]" offset;
       "push rax" ]
+  | FuncCall (func, arg) -> String.concat "\n" [
+      generate func;
+      generate arg;
+      "pop rax";
+      "pop r10";
+      "call r10";
+      "push rax" ]
   | _ -> failwith "unexpected ast";;
 
 let code = generate (analyze (parse (tokenize 0))) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
+    "id:";
+    "ret";
+    "add1:";
+    "add rax, 1";
+    "ret";
     ".global main";
     "main:";
     "mov rbp, rsp";
     "sub rsp, 64";
     "mov rax, 7";
     "mov [rbp - 8], rax";
+    "lea rax, [rip + id]";
+    "mov [rbp - 16], rax";
+    "lea rax, [rip + add1]";
+    "mov [rbp - 24], rax";
     code;
     "pop rax";
     "sar rax, 1";
