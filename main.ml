@@ -14,6 +14,8 @@ type token =
   | Star
   | Slash
   | Ident of string
+  | LParen
+  | RParen
 ;;
 
 exception EOF;;
@@ -55,6 +57,8 @@ let rec tokenize i =
     | '-' -> Minus::tokenize i
     | '*' -> Star::tokenize i
     | '/' -> Slash::tokenize i
+    | '(' -> LParen::tokenize i
+    | ')' -> RParen::tokenize i
     | _ -> failwith (sprintf "unexpected char: '%c'" ch)
   with
     EOF -> [];;
@@ -69,12 +73,18 @@ type ast =
 ;;
 
 let parse tokens =
-  let parse_primary = function
+  let rec parse_primary = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
     | (Ident id)::tokens -> (tokens, Var (id, None))
+    | LParen::tokens ->
+      let (tokens, ast) = parse_expression tokens in
+      begin match tokens with
+        | RParen::tokens -> (tokens, ast)
+        | _ -> failwith "unexpected token"
+      end
     | _ -> failwith "unexpected token"
-  in
-  let parse_multiplicative tokens =
+  and
+    parse_multiplicative tokens =
     let rec aux lhs tokens = match tokens with
       | Star::tokens ->
         let (tokens, rhs) = parse_primary tokens in
@@ -85,8 +95,8 @@ let parse tokens =
       | _ -> (tokens, lhs) in
     let (tokens, ast) = parse_primary tokens in
     aux ast tokens
-  in
-  let parse_additive tokens =
+  and
+    parse_additive tokens =
     let rec aux lhs tokens = match tokens with
       | Plus::tokens ->
         let (tokens, rhs) = parse_multiplicative tokens in
@@ -97,9 +107,11 @@ let parse tokens =
       | _ -> (tokens, lhs) in
     let (tokens, ast) = parse_multiplicative tokens in
     aux ast tokens
-  in
-  let (_, ast) = parse_additive tokens in
-  ast
+  and
+    parse_expression tokens = parse_additive tokens in
+
+  let (tokens, ast) = parse_expression tokens in
+  if tokens = [] then ast else failwith "invalid token sequence"
 ;;
 
 type environment = { symbols : (string, ast) Hashtbl.t };;
