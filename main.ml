@@ -70,7 +70,7 @@ type ast =
   | Mul of (ast * ast)
   | Div of (ast * ast)
   | Var of (string * int option)
-  | FuncCall of (ast * ast)
+  | FuncCall of (ast * ast list)
 ;;
 
 let parse tokens =
@@ -87,13 +87,17 @@ let parse tokens =
     | _ -> failwith "unexpected token"
   and
     parse_funccall tokens =
-    let rec aux func tokens = match tokens with
-      | (IntLiteral _ | Ident _ | LParen)::_ ->
+    let rec aux tokens = match tokens with
+      | (IntLiteral _ | Ident _ | LParen)::_ ->    (* if primary *)
         let (tokens, arg) = parse_primary tokens in
-        aux (FuncCall (func, arg)) tokens
-      | _ -> (tokens, func) in
-    let (tokens, ast) = parse_primary tokens in
-    aux ast tokens
+        let (tokens, args) = aux tokens in
+        (tokens, arg::args)
+      | _ -> (tokens, []) in
+
+    let (tokens, func) = parse_primary tokens in
+    let (tokens, args) = aux tokens in
+    if args = [] then (tokens, func)    (* not function call *)
+    else (tokens, FuncCall (func, args))
   and
     parse_multiplicative tokens =
     let rec aux lhs tokens = match tokens with
@@ -135,19 +139,18 @@ let analyze ast =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | Var (name, _) -> Hashtbl.find env.symbols name
-    | FuncCall (func, arg) -> FuncCall (aux env func, aux env arg) in
+    | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args) in
   let env = {symbols = Hashtbl.create 16} in
   Hashtbl.add env.symbols "pi" (Var ("pi", Some (-8)));
   Hashtbl.add env.symbols "id" (Var ("id", Some (-16)));
   Hashtbl.add env.symbols "add1" (Var ("add1", Some (-24)));
+  Hashtbl.add env.symbols "add" (Var ("add", Some (-32)));
   aux env ast
 ;;
 
 let rec generate ast =
-  let
-    tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg and
-  untag_int reg = sprintf "sar %s, 1" reg
-  in
+  let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
+  let untag_int reg = sprintf "sar %s, 1" reg in
   match ast with
   | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
   | Add (lhs, rhs) -> String.concat "\n" [
@@ -194,10 +197,14 @@ let rec generate ast =
   | Var (_, Some offset) -> String.concat "\n" [
       sprintf "mov rax, [rbp + %d]" offset;
       "push rax" ]
-  | FuncCall (func, arg) -> String.concat "\n" [
+  | FuncCall (func, args) -> String.concat "\n" [
       generate func;
-      generate arg;
-      "pop rax";
+      String.concat "\n" (List.map generate args);
+      String.concat "\n" (
+        List.map (fun (_, reg) -> "pop " ^ reg) (
+          List.filter (fun (index, reg) -> index < List.length args) [
+            (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
+            (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
       "pop r10";
       "call r10";
       "push rax" ]
@@ -209,7 +216,19 @@ print_string (String.concat "\n" [
     "id:";
     "ret";
     "add1:";
+    "sar rax, 1";
     "add rax, 1";
+    "sal rax";
+    "or rax, 1";
+    "ret";
+    "add:";
+    "sar rax, 1";
+    "sar rbx, 1";
+    "add rax, rbx";
+    "sal rax";
+    "or rax, 1";
+    "sal rbx";
+    "or rbx, 1";
     "ret";
     ".global main";
     "main:";
@@ -221,6 +240,8 @@ print_string (String.concat "\n" [
     "mov [rbp - 16], rax";
     "lea rax, [rip + add1]";
     "mov [rbp - 24], rax";
+    "lea rax, [rip + add]";
+    "mov [rbp - 32], rax";
     code;
     "pop rax";
     "sar rax, 1";

@@ -31,3 +31,6 @@ test_aqaml "id (id 10)" 10
 test_aqaml "1 + id 2 + 3" 6
 test_aqaml "add1 2 * 3" 9
 test_aqaml "add1 (2 * 3)" 7
+test_aqaml "add 2 3" 5
+test_aqaml "add (add 2 3) (add 3 4)" 12
+test_aqaml "2 * add (add 2 3) (add 3 4)" 24
