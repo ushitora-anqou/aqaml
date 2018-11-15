@@ -73,79 +73,68 @@ type ast =
   | FuncCall of (ast * ast list)
 ;;
 
+module HashMap = Map.Make(String);;
+type environment = {symbols: ast HashMap.t };;
 let parse tokens =
   let rec
-    parse_primary = function
+    parse_primary env = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
-    | (Ident id)::tokens -> (tokens, Var (id, None))
+    | (Ident id)::tokens -> (tokens, HashMap.find id env.symbols)
     | LParen::tokens ->
-      let (tokens, ast) = parse_expression tokens in
+      let (tokens, ast) = parse_expression env tokens in
       begin match tokens with
         | RParen::tokens -> (tokens, ast)
         | _ -> failwith "unexpected token"
       end
     | _ -> failwith "unexpected token"
   and
-    parse_funccall tokens =
+    parse_funccall env tokens =
     let rec aux tokens = match tokens with
       | (IntLiteral _ | Ident _ | LParen)::_ ->    (* if primary *)
-        let (tokens, arg) = parse_primary tokens in
+        let (tokens, arg) = parse_primary env tokens in
         let (tokens, args) = aux tokens in
         (tokens, arg::args)
       | _ -> (tokens, []) in
 
-    let (tokens, func) = parse_primary tokens in
+    let (tokens, func) = parse_primary env tokens in
     let (tokens, args) = aux tokens in
     if args = [] then (tokens, func)    (* not function call *)
     else (tokens, FuncCall (func, args))
   and
-    parse_multiplicative tokens =
+    parse_multiplicative env tokens =
     let rec aux lhs tokens = match tokens with
       | Star::tokens ->
-        let (tokens, rhs) = parse_funccall tokens in
+        let (tokens, rhs) = parse_funccall env tokens in
         aux (Mul (lhs, rhs)) tokens
       | Slash::tokens ->
-        let (tokens, rhs) = parse_funccall tokens in
+        let (tokens, rhs) = parse_funccall env tokens in
         aux (Div (lhs, rhs)) tokens
       | _ -> (tokens, lhs) in
-    let (tokens, ast) = parse_funccall tokens in
+    let (tokens, ast) = parse_funccall env tokens in
     aux ast tokens
   and
-    parse_additive tokens =
+    parse_additive env tokens =
     let rec aux lhs tokens = match tokens with
       | Plus::tokens ->
-        let (tokens, rhs) = parse_multiplicative tokens in
+        let (tokens, rhs) = parse_multiplicative env tokens in
         aux (Add (lhs, rhs)) tokens
       | Minus::tokens ->
-        let (tokens, rhs) = parse_multiplicative tokens in
+        let (tokens, rhs) = parse_multiplicative env tokens in
         aux (Sub (lhs, rhs)) tokens
       | _ -> (tokens, lhs) in
-    let (tokens, ast) = parse_multiplicative tokens in
+    let (tokens, ast) = parse_multiplicative env tokens in
     aux ast tokens
   and
-    parse_expression tokens = parse_additive tokens in
+    parse_expression env tokens = parse_additive env tokens in
 
-  let (tokens, ast) = parse_expression tokens in
+  let symbols = HashMap.empty in
+  let symbols = HashMap.add "pi" (Var ("pi", Some (-8))) symbols in
+  let symbols = HashMap.add "id" (Var ("id", Some (-16))) symbols in
+  let symbols = HashMap.add "add1" (Var ("add1", Some (-24))) symbols in
+  let symbols = HashMap.add "add" (Var ("add", Some (-32))) symbols in
+  let env = {symbols} in
+  let (tokens, ast) = parse_expression env tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
-;;
-
-type environment = { symbols : (string, ast) Hashtbl.t };;
-let analyze ast =
-  let rec aux env ast =
-    match ast with
-    | Int _ -> ast
-    | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
-    | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
-    | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
-    | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var (name, _) -> Hashtbl.find env.symbols name
-    | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args) in
-  let env = {symbols = Hashtbl.create 16} in
-  Hashtbl.add env.symbols "pi" (Var ("pi", Some (-8)));
-  Hashtbl.add env.symbols "id" (Var ("id", Some (-16)));
-  Hashtbl.add env.symbols "add1" (Var ("add1", Some (-24)));
-  Hashtbl.add env.symbols "add" (Var ("add", Some (-32)));
-  aux env ast
 ;;
 
 let rec generate ast =
@@ -210,7 +199,7 @@ let rec generate ast =
       "push rax" ]
   | _ -> failwith "unexpected ast";;
 
-let code = generate (analyze (parse (tokenize 0))) in
+let code = generate (parse (tokenize 0)) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
     "id:";
