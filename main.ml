@@ -20,6 +20,7 @@ type token =
   | Let
   | Equal
   | In
+  | Rec
 ;;
 
 exception EOF;;
@@ -60,6 +61,7 @@ let rec tokenize i =
       begin match str with
         | "let" -> Let
         | "in" -> In
+        | "rec" -> Rec
         | _ -> Ident str
       end::tokenize i
     | '+' -> Plus::tokenize i
@@ -141,6 +143,14 @@ let parse tokens =
         | In::tokens ->
           let (tokens, rhs) = parse_expression tokens in
           (tokens, LetVar (varname, lhs, rhs))
+        | _ -> failwith "unexpected token"
+      end
+    | Let::Rec::(Ident funcname)::(Ident argname)::Equal::tokens ->
+      let (tokens, func) = parse_expression tokens in
+      begin match tokens with
+        | In::tokens ->
+          let (tokens, body) = parse_expression tokens in
+          (tokens, LetRec (funcname, argname, func, body))
         | _ -> failwith "unexpected token"
       end
     | _ -> parse_additive tokens
@@ -298,7 +308,6 @@ let rec generate (ast, letrecs) =
 ;;
 
 let ast = parse (tokenize 0) in
-let ast = LetRec ("id", "idx", Var ("idx"), ast) in
 let code = generate (analyze ast) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
