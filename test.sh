@@ -22,10 +22,10 @@ test_aqaml "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1" 10
 test_aqaml "(1 + 2) * 3" 9
 test_aqaml "(1 + 2) * (3 + 4)" 21
 test_aqaml "(33 * (1 + 2)) / 3" 33
-#test_aqaml "pi" 3
-#test_aqaml "pi*2" 6
-#test_aqaml "pi+2" 5
-#test_aqaml "10-pi" 7
+test_aqaml "pi" 3
+test_aqaml "pi*2" 6
+test_aqaml "pi+2" 5
+test_aqaml "10-pi" 7
 #test_aqaml "id 10" 10
 #test_aqaml "id (id 10)" 10
 #test_aqaml "1 + id 2 + 3" 6

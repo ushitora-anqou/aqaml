@@ -69,15 +69,16 @@ type ast =
   | Sub of (ast * ast)
   | Mul of (ast * ast)
   | Div of (ast * ast)
-  | Var of (string * int option)
+  | Var of (string)
   | FuncCall of (ast * ast list)
+  | LetVar of (string * ast * ast)
 ;;
 
 let parse tokens =
   let rec
     parse_primary = function
     | (IntLiteral num)::tokens -> (tokens, Int num)
-    | (Ident id)::tokens -> (tokens, Var (id, None))
+    | (Ident id)::tokens -> (tokens, Var id)
     | LParen::tokens ->
       let (tokens, ast) = parse_expression tokens in
       begin match tokens with
@@ -139,8 +140,13 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var (name, _) -> HashMap.find name env.symbols
-    | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args) in
+    | Var (name) -> HashMap.find name env.symbols
+    | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
+    | LetVar (varname, lhs, rhs) ->
+      let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
+      LetVar (varname, (aux env lhs), (aux env' rhs))
+  in
+
   let symbols = HashMap.empty in
   aux {symbols} ast
 ;;
@@ -148,74 +154,95 @@ let analyze ast =
 let rec generate ast =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
-  match ast with
-  | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
-  | Add (lhs, rhs) -> String.concat "\n" [
-      generate lhs;
-      generate rhs;
-      "pop rdi";
-      untag_int "rdi";
-      "pop rax";
-      untag_int "rax";
-      "add rax, rdi";
-      tag_int "rax";
-      "push rax" ]
-  | Sub (lhs, rhs) -> String.concat "\n" [
-      generate lhs;
-      generate rhs;
-      "pop rdi";
-      untag_int "rdi";
-      "pop rax";
-      untag_int "rax";
-      "sub rax, rdi";
-      tag_int "rax";
-      "push rax" ]
-  | Mul (lhs, rhs) -> String.concat "\n" [
-      generate lhs;
-      generate rhs;
-      "pop rdi";
-      untag_int "rdi";
-      "pop rax";
-      untag_int "rax";
-      "imul rax, rdi";
-      tag_int "rax";
-      "push rax" ]
-  | Div (lhs, rhs) -> String.concat "\n" [
-      generate lhs;
-      generate rhs;
-      "pop rdi";
-      untag_int "rdi";
-      "pop rax";
-      untag_int "rax";
-      "cqo";
-      "idiv rdi";
-      tag_int "rax";
-      "push rax" ]
-  | Var (_, Some offset) -> String.concat "\n" [
-      sprintf "mov rax, [rbp + %d]" offset;
-      "push rax" ]
-  | FuncCall (func, args) -> String.concat "\n" [
-      generate func;
-      String.concat "\n" (List.map generate args);
-      String.concat "\n" (
-        List.map (fun (_, reg) -> "pop " ^ reg) (
-          List.filter (fun (index, reg) -> index < List.length args) [
-            (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
-            (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
-      "pop r10";
-      "call r10";
-      "push rax" ]
-  | _ -> failwith "unexpected ast";;
+  let varoffset = Hashtbl.create 16 in
+  let offset = ref 0 in
+  let rec aux = function
+    | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
+    | Add (lhs, rhs) -> String.concat "\n" [
+        aux lhs;
+        aux rhs;
+        "pop rdi";
+        untag_int "rdi";
+        "pop rax";
+        untag_int "rax";
+        "add rax, rdi";
+        tag_int "rax";
+        "push rax" ]
+    | Sub (lhs, rhs) -> String.concat "\n" [
+        aux lhs;
+        aux rhs;
+        "pop rdi";
+        untag_int "rdi";
+        "pop rax";
+        untag_int "rax";
+        "sub rax, rdi";
+        tag_int "rax";
+        "push rax" ]
+    | Mul (lhs, rhs) -> String.concat "\n" [
+        aux lhs;
+        aux rhs;
+        "pop rdi";
+        untag_int "rdi";
+        "pop rax";
+        untag_int "rax";
+        "imul rax, rdi";
+        tag_int "rax";
+        "push rax" ]
+    | Div (lhs, rhs) -> String.concat "\n" [
+        aux lhs;
+        aux rhs;
+        "pop rdi";
+        untag_int "rdi";
+        "pop rax";
+        untag_int "rax";
+        "cqo";
+        "idiv rdi";
+        tag_int "rax";
+        "push rax" ]
+    | Var varname ->
+      let offset = Hashtbl.find varoffset varname in
+      String.concat "\n" [
+        sprintf "mov rax, [rbp + %d]" offset;
+        "push rax" ]
+    | FuncCall (func, args) -> String.concat "\n" [
+        aux func;
+        String.concat "\n" (List.map aux args);
+        String.concat "\n" (
+          List.map (fun (_, reg) -> "pop " ^ reg) (
+            List.filter (fun (index, reg) -> index < List.length args) [
+              (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
+              (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
+        "pop r10";
+        "call r10";
+        "push rax" ]
+    | LetVar (varname, lhs, rhs) ->
+      offset := !offset - 8;
+      Hashtbl.add varoffset varname !offset;
+      String.concat "\n" [
+        aux lhs;
+        "pop rax";
+        sprintf "mov [rbp + %d], rax" !offset;
+        aux rhs ]
+    | _ -> failwith "unexpected ast"
+  in
 
-let code = generate (analyze (parse (tokenize 0))) in
-print_string (String.concat "\n" [
-    ".intel_syntax noprefix";
-    ".global main";
+  String.concat "\n" [
     "main:";
     "mov rbp, rsp";
-    code;
+    sprintf "add rsp, %d" !offset;
+    aux ast;
     "pop rax";
     "sar rax, 1";
     "mov rsp, rbp";
     "ret\n";
+  ]
+;;
+
+let ast = parse (tokenize 0) in
+let ast = LetVar ("pi", Int 3, ast) in
+let code = generate (analyze ast) in
+print_string (String.concat "\n" [
+    ".intel_syntax noprefix";
+    ".global main";
+    code;
   ]);;
