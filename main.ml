@@ -142,10 +142,6 @@ let analyze ast =
     | Var (name, _) -> HashMap.find name env.symbols
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args) in
   let symbols = HashMap.empty in
-  let symbols = HashMap.add "pi" (Var ("pi", Some (-8))) symbols in
-  let symbols = HashMap.add "id" (Var ("id", Some (-16))) symbols in
-  let symbols = HashMap.add "add1" (Var ("add1", Some (-24))) symbols in
-  let symbols = HashMap.add "add" (Var ("add", Some (-32))) symbols in
   aux {symbols} ast
 ;;
 
@@ -214,35 +210,9 @@ let rec generate ast =
 let code = generate (analyze (parse (tokenize 0))) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
-    "id:";
-    "ret";
-    "add1:";
-    "sar rax, 1";
-    "add rax, 1";
-    "sal rax";
-    "or rax, 1";
-    "ret";
-    "add:";
-    "sar rax, 1";
-    "sar rbx, 1";
-    "add rax, rbx";
-    "sal rax";
-    "or rax, 1";
-    "sal rbx";
-    "or rbx, 1";
-    "ret";
     ".global main";
     "main:";
     "mov rbp, rsp";
-    "sub rsp, 64";
-    "mov rax, 7";
-    "mov [rbp - 8], rax";
-    "lea rax, [rip + id]";
-    "mov [rbp - 16], rax";
-    "lea rax, [rip + add1]";
-    "mov [rbp - 24], rax";
-    "lea rax, [rip + add]";
-    "mov [rbp - 32], rax";
     code;
     "pop rax";
     "sar rax, 1";
