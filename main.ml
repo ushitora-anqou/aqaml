@@ -3,7 +3,8 @@ open Scanf;;
 
 let digit x = match x with
   | '0'..'9' -> (int_of_char x) - (int_of_char '0')
-  | _ -> failwith "unexpected char: not digit";;
+  | _ -> failwith "unexpected char: not digit"
+;;
 
 let program = read_line ();;
 
@@ -16,6 +17,9 @@ type token =
   | Ident of string
   | LParen
   | RParen
+  | Let
+  | Equal
+  | In
 ;;
 
 exception EOF;;
@@ -52,13 +56,19 @@ let rec tokenize i =
     | '0'..'9' ->
       let (i, num) = next_int (i - 1) 0 in (IntLiteral num)::tokenize i
     | 'a'..'z' | 'A'..'Z' ->
-      let (i, str) = next_ident (i - 1) in (Ident str)::tokenize i
+      let (i, str) = next_ident (i - 1) in
+      begin match str with
+        | "let" -> Let
+        | "in" -> In
+        | _ -> Ident str
+      end::tokenize i
     | '+' -> Plus::tokenize i
     | '-' -> Minus::tokenize i
     | '*' -> Star::tokenize i
     | '/' -> Slash::tokenize i
     | '(' -> LParen::tokenize i
     | ')' -> RParen::tokenize i
+    | '=' -> Equal::tokenize i
     | _ -> failwith (sprintf "unexpected char: '%c'" ch)
   with
     EOF -> [];;
@@ -94,7 +104,6 @@ let parse tokens =
         let (tokens, args) = aux tokens in
         (tokens, arg::args)
       | _ -> (tokens, []) in
-
     let (tokens, func) = parse_primary tokens in
     let (tokens, args) = aux tokens in
     if args = [] then (tokens, func)    (* not function call *)
@@ -124,7 +133,18 @@ let parse tokens =
     let (tokens, ast) = parse_multiplicative tokens in
     aux ast tokens
   and
-    parse_expression tokens = parse_additive tokens in
+    parse_let tokens = match tokens with
+    | Let::(Ident varname)::Equal::tokens ->
+      let (tokens, lhs) = parse_expression tokens in
+      begin match tokens with
+        | In::tokens ->
+          let (tokens, rhs) = parse_expression tokens in
+          (tokens, LetVar (varname, lhs, rhs))
+        | _ -> failwith "unexpected token"
+      end
+    | _ -> parse_additive tokens
+  and
+    parse_expression tokens = parse_let tokens in
 
   let (tokens, ast) = parse_expression tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
@@ -216,21 +236,25 @@ let rec generate ast =
         "call r10";
         "push rax" ]
     | LetVar (varname, lhs, rhs) ->
+      let lhs_code = aux lhs in
       offset := !offset - 8;
-      Hashtbl.add varoffset varname !offset;
+      let offset = !offset in
+      Hashtbl.add varoffset varname offset;
       String.concat "\n" [
-        aux lhs;
+        lhs_code;
         "pop rax";
-        sprintf "mov [rbp + %d], rax" !offset;
+        sprintf "mov [rbp + %d], rax" offset;
         aux rhs ]
     | _ -> failwith "unexpected ast"
   in
 
+  let code = aux ast in
+  let offset = !offset in
   String.concat "\n" [
     "main:";
     "mov rbp, rsp";
-    sprintf "add rsp, %d" !offset;
-    aux ast;
+    sprintf "add rsp, %d" offset;
+    code;
     "pop rax";
     "sar rax, 1";
     "mov rsp, rbp";
@@ -239,10 +263,9 @@ let rec generate ast =
 ;;
 
 let ast = parse (tokenize 0) in
-let ast = LetVar ("pi", Int 3, ast) in
 let code = generate (analyze ast) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
     ".global main";
-    code;
-  ]);;
+    code ])
+;;
