@@ -30,9 +30,9 @@ test_aqaml "let x = 1 in let y = 2 in x + y" 3
 test_aqaml "let x = 1 in let y = 2 in let z = 3 in let w = x + y * z in w * 2" 14
 test_aqaml "let x = 1 in let x = x + 1 in x" 2
 test_aqaml "let x = (let y = 2 in y + 2) in x + 2" 6
-#test_aqaml "id 10" 10
-#test_aqaml "id (id 10)" 10
-#test_aqaml "1 + id 2 + 3" 6
+test_aqaml "id 10" 10
+test_aqaml "id (id 10)" 10
+test_aqaml "1 + id 2 + 3" 6
 #test_aqaml "add1 2 * 3" 9
 #test_aqaml "add1 (2 * 3)" 7
 #test_aqaml "add 2 3" 5

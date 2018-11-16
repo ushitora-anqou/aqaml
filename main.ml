@@ -82,6 +82,7 @@ type ast =
   | Var of (string)
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
+  | LetRec of (string * string * ast * ast)
 ;;
 
 let parse tokens =
@@ -153,6 +154,7 @@ let parse tokens =
 module HashMap = Map.Make(String);;
 type environment = {symbols: ast HashMap.t};;
 let analyze ast =
+  let letrecs = ref [] in
   let rec aux env ast =
     match ast with
     | Int _ -> ast
@@ -165,18 +167,26 @@ let analyze ast =
     | LetVar (varname, lhs, rhs) ->
       let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, (aux env lhs), (aux env' rhs))
+    | LetRec (funcname, argname, func, body) ->   (* TODO: allow recursion *)
+      let env' = {env with symbols = HashMap.add argname (Var argname) env.symbols} in
+      let func = aux env' func in
+      let env' = {env with symbols = HashMap.add funcname (Var funcname) env.symbols} in
+      let ast = LetRec (funcname, argname, func, aux env' body) in
+      letrecs := ast::(!letrecs);
+      ast
   in
 
   let symbols = HashMap.empty in
-  aux {symbols} ast
+  let ast = aux {symbols} ast in
+  (ast, !letrecs)
 ;;
 
-let rec generate ast =
+let rec generate (ast, letrecs) =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
-  let varoffset = Hashtbl.create 16 in
+  let varoffset = ref (Hashtbl.create 16) in
   let offset = ref 0 in
-  let rec aux = function
+  let rec aux ast = match ast with
     | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
     | Add (lhs, rhs) -> String.concat "\n" [
         aux lhs;
@@ -220,7 +230,7 @@ let rec generate ast =
         tag_int "rax";
         "push rax" ]
     | Var varname ->
-      let offset = Hashtbl.find varoffset varname in
+      let offset = Hashtbl.find !varoffset varname in
       String.concat "\n" [
         sprintf "mov rax, [rbp + %d]" offset;
         "push rax" ]
@@ -239,30 +249,56 @@ let rec generate ast =
       let lhs_code = aux lhs in
       offset := !offset - 8;
       let offset = !offset in
-      Hashtbl.add varoffset varname offset;
+      Hashtbl.add !varoffset varname offset;
       String.concat "\n" [
         lhs_code;
         "pop rax";
         sprintf "mov [rbp + %d], rax" offset;
         aux rhs ]
-    | _ -> failwith "unexpected ast"
-  in
+    | LetRec (funcname, _, _, body) ->
+      offset := !offset - 8;
+      let offset = !offset in
+      Hashtbl.add !varoffset funcname offset;
+      String.concat "\n" [
+        sprintf "lea rax, [rip + %s]" funcname;
+        sprintf "mov [rbp + %d], rax" offset;
+        aux body ]
+    | _ -> failwith "unexpected ast" in
 
   let code = aux ast in
-  let offset = !offset in
-  String.concat "\n" [
-    "main:";
-    "mov rbp, rsp";
-    sprintf "add rsp, %d" offset;
-    code;
-    "pop rax";
-    "sar rax, 1";
-    "mov rsp, rbp";
-    "ret\n";
-  ]
+  let main_code = String.concat "\n" [
+      "main:";
+      "push rbp";
+      "mov rbp, rsp";
+      sprintf "add rsp, %d" !offset;
+      code;
+      "pop rax";
+      "sar rax, 1";
+      "mov rsp, rbp";
+      "pop rbp";
+      "ret\n" ] in
+  let letrecs_code = String.concat "\n" (List.map (fun (LetRec (funcname, argname, func, _)) ->
+      varoffset := Hashtbl.create 16;
+      offset := -8;
+      let arg_offset = !offset in
+      Hashtbl.add !varoffset argname arg_offset;
+      let code = aux func in
+      String.concat "\n" [
+        funcname ^ ":";
+        "push rbp";
+        "mov rbp, rsp";
+        sprintf "add rsp, %d" !offset;
+        sprintf "mov [rbp + %d], rax" arg_offset;
+        code;
+        "pop rax";
+        "mov rsp, rbp";
+        "pop rbp";
+        "ret\n" ]) letrecs) in
+  main_code ^ letrecs_code
 ;;
 
 let ast = parse (tokenize 0) in
+let ast = LetRec ("id", "idx", Var ("idx"), ast) in
 let code = generate (analyze ast) in
 print_string (String.concat "\n" [
     ".intel_syntax noprefix";
