@@ -74,7 +74,7 @@ type ast =
 ;;
 
 module HashMap = Map.Make(String);;
-type environment = {symbols: ast HashMap.t; funcdefs: (string * ast) list };;
+type environment = {symbols: ast HashMap.t };;
 let parse tokens =
   let rec
     parse_primary env = function
@@ -132,100 +132,72 @@ let parse tokens =
   let symbols = HashMap.add "id" (Var ("id", Some (-16))) symbols in
   let symbols = HashMap.add "add1" (Var ("add1", Some (-24))) symbols in
   let symbols = HashMap.add "add" (Var ("add", Some (-32))) symbols in
-  let env = {symbols; funcdefs = []} in
+  let env = {symbols} in
   let (tokens, ast) = parse_expression env tokens in
-  if tokens <> [] then failwith "invalid token sequence"
-  else
-    ("main", ast)::env.funcdefs
+  if tokens = [] then ast else failwith "invalid token sequence"
 ;;
 
-let rec generate funcdefs =
+let rec generate ast =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
-  let rec aux = function
-    | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
-    | Add (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
-        "pop rdi";
-        untag_int "rdi";
-        "pop rax";
-        untag_int "rax";
-        "add rax, rdi";
-        tag_int "rax";
-        "push rax" ]
-    | Sub (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
-        "pop rdi";
-        untag_int "rdi";
-        "pop rax";
-        untag_int "rax";
-        "sub rax, rdi";
-        tag_int "rax";
-        "push rax" ]
-    | Mul (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
-        "pop rdi";
-        untag_int "rdi";
-        "pop rax";
-        untag_int "rax";
-        "imul rax, rdi";
-        tag_int "rax";
-        "push rax" ]
-    | Div (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
-        "pop rdi";
-        untag_int "rdi";
-        "pop rax";
-        untag_int "rax";
-        "cqo";
-        "idiv rdi";
-        tag_int "rax";
-        "push rax" ]
-    | Var (_, Some offset) -> String.concat "\n" [
-        sprintf "mov rax, [rbp + %d]" offset;
-        "push rax" ]
-    | FuncCall (func, args) -> String.concat "\n" [
-        aux func;
-        String.concat "\n" (List.map aux args);
-        String.concat "\n" (
-          List.map (fun (_, reg) -> "pop " ^ reg) (
-            List.filter (fun (index, reg) -> index < List.length args) [
-              (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
-              (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
-        "pop r10";
-        "call r10";
-        "push rax" ]
-    | _ -> failwith "unexpected ast" in
-  let rec generate = function
-    | (genname, func)::funcdefs -> String.concat "\n" [
-        genname ^ ":";
-        "mov rbp, rsp";
-        if genname <> "main" then ""
-        else
-          String.concat "\n" [
-            "sub rsp, 64";
-            "mov rax, 7";
-            "mov [rbp - 8], rax";
-            "lea rax, [rip + id]";
-            "mov [rbp - 16], rax";
-            "lea rax, [rip + add1]";
-            "mov [rbp - 24], rax";
-            "lea rax, [rip + add]";
-            "mov [rbp - 32], rax" ];
-        aux func;
-        "pop rax";
-        "sar rax, 1";
-        "mov rsp, rbp";
-        "ret" ]
-    | [] -> ""
-  in
-
-  generate funcdefs
-;;
+  match ast with
+  | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
+  | Add (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "add rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Sub (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "sub rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Mul (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "imul rax, rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Div (lhs, rhs) -> String.concat "\n" [
+      generate lhs;
+      generate rhs;
+      "pop rdi";
+      untag_int "rdi";
+      "pop rax";
+      untag_int "rax";
+      "cqo";
+      "idiv rdi";
+      tag_int "rax";
+      "push rax" ]
+  | Var (_, Some offset) -> String.concat "\n" [
+      sprintf "mov rax, [rbp + %d]" offset;
+      "push rax" ]
+  | FuncCall (func, args) -> String.concat "\n" [
+      generate func;
+      String.concat "\n" (List.map generate args);
+      String.concat "\n" (
+        List.map (fun (_, reg) -> "pop " ^ reg) (
+          List.filter (fun (index, reg) -> index < List.length args) [
+            (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
+            (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
+      "pop r10";
+      "call r10";
+      "push rax" ]
+  | _ -> failwith "unexpected ast";;
 
 let code = generate (parse (tokenize 0)) in
 print_string (String.concat "\n" [
@@ -248,6 +220,20 @@ print_string (String.concat "\n" [
     "or rbx, 1";
     "ret";
     ".global main";
+    "main:";
+    "mov rbp, rsp";
+    "sub rsp, 64";
+    "mov rax, 7";
+    "mov [rbp - 8], rax";
+    "lea rax, [rip + id]";
+    "mov [rbp - 16], rax";
+    "lea rax, [rip + add1]";
+    "mov [rbp - 24], rax";
+    "lea rax, [rip + add]";
+    "mov [rbp - 32], rax";
     code;
-    "\n"
+    "pop rax";
+    "sar rax, 1";
+    "mov rsp, rbp";
+    "ret\n";
   ]);;
