@@ -129,7 +129,8 @@ let parse tokens =
   if tokens = [] then ast else failwith "invalid token sequence"
 ;;
 
-type environment = { symbols : (string, ast) Hashtbl.t };;
+module HashMap = Map.Make(String);;
+type environment = {symbols: ast HashMap.t};;
 let analyze ast =
   let rec aux env ast =
     match ast with
@@ -138,14 +139,14 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var (name, _) -> Hashtbl.find env.symbols name
+    | Var (name, _) -> HashMap.find name env.symbols
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args) in
-  let env = {symbols = Hashtbl.create 16} in
-  Hashtbl.add env.symbols "pi" (Var ("pi", Some (-8)));
-  Hashtbl.add env.symbols "id" (Var ("id", Some (-16)));
-  Hashtbl.add env.symbols "add1" (Var ("add1", Some (-24)));
-  Hashtbl.add env.symbols "add" (Var ("add", Some (-32)));
-  aux env ast
+  let symbols = HashMap.empty in
+  let symbols = HashMap.add "pi" (Var ("pi", Some (-8))) symbols in
+  let symbols = HashMap.add "id" (Var ("id", Some (-16))) symbols in
+  let symbols = HashMap.add "add1" (Var ("add1", Some (-24))) symbols in
+  let symbols = HashMap.add "add" (Var ("add", Some (-32))) symbols in
+  aux {symbols} ast
 ;;
 
 let rec generate ast =
