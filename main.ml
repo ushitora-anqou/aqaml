@@ -6,6 +6,12 @@ let digit x = match x with
   | _ -> failwith "unexpected char: not digit"
 ;;
 
+let id_counter = ref 0;;
+let make_id base =
+  id_counter := !id_counter + 1;
+  sprintf "%s.%d" base !id_counter
+;;
+
 let program = read_line ();;
 
 type token =
@@ -172,16 +178,17 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var (name) -> HashMap.find name env.symbols
+    | Var name -> HashMap.find name env.symbols
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
     | LetVar (varname, lhs, rhs) ->
       let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, (aux env lhs), (aux env' rhs))
     | LetRec (funcname, argname, func, body) ->   (* TODO: allow recursion *)
+      let gen_funcname = make_id funcname in
       let env' = {env with symbols = HashMap.add argname (Var argname) env.symbols} in
       let func = aux env' func in
-      let env' = {env with symbols = HashMap.add funcname (Var funcname) env.symbols} in
-      let ast = LetRec (funcname, argname, func, aux env' body) in
+      let env' = {env with symbols = HashMap.add funcname (Var gen_funcname) env.symbols} in
+      let ast = LetRec (gen_funcname, argname, func, aux env' body) in
       letrecs := ast::(!letrecs);
       ast
   in
