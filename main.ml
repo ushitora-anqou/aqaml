@@ -188,11 +188,13 @@ let analyze ast =
 
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
-  (ast, !letrecs)
+  let ast = LetRec ("aqaml_main", "aqaml_main_dummy", ast, Int 0) in
+  letrecs := ast::(!letrecs);
+  !letrecs
 ;;
 
 type gen_environment = {offset: int; varoffset: int HashMap.t};;
-let rec generate (ast, letrecs) =
+let rec generate letrecs =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let stack_size = ref 0 in
@@ -276,20 +278,6 @@ let rec generate (ast, letrecs) =
         aux env body ]
     | _ -> failwith "unexpected ast" in
 
-  let env = {offset = 0; varoffset = HashMap.empty} in
-  stack_size := 0;
-  let code = aux env ast in
-  let main_code = String.concat "\n" [
-      "main:";
-      "push rbp";
-      "mov rbp, rsp";
-      sprintf "sub rsp, %d" !stack_size;
-      code;
-      "pop rax";
-      "sar rax, 1";
-      "mov rsp, rbp";
-      "pop rbp";
-      "ret\n" ] in
   let letrecs_code = String.concat "\n" (List.map (fun (LetRec (funcname, argname, func, _)) ->
       let arg_offset = -8 in
       let env = {offset = arg_offset; varoffset = HashMap.singleton argname arg_offset} in
@@ -306,6 +294,12 @@ let rec generate (ast, letrecs) =
         "mov rsp, rbp";
         "pop rbp";
         "ret\n" ]) letrecs) in
+  let main_code = String.concat "\n" [
+      "main:";
+      "call aqaml_main";
+      "sar rax, 1";
+      "ret\n\n" ] in
+
   main_code ^ letrecs_code
 ;;
 
