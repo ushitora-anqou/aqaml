@@ -90,7 +90,7 @@ type ast =
   | Var of (string)
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
-  | LetRec of (string * string * ast * ast)
+  | LetFunc of (string * string * ast * ast)
 ;;
 
 let parse tokens =
@@ -156,7 +156,7 @@ let parse tokens =
       begin match tokens with
         | In::tokens ->
           let (tokens, body) = parse_expression tokens in
-          (tokens, LetRec (funcname, argname, func, body))
+          (tokens, LetFunc (funcname, argname, func, body))
         | _ -> failwith "unexpected token"
       end
     | _ -> parse_additive tokens
@@ -170,7 +170,7 @@ let parse tokens =
 module HashMap = Map.Make(String);;
 type environment = {symbols: ast HashMap.t};;
 let analyze ast =
-  let letrecs = ref [] in
+  let letfuncs = ref [] in
   let rec aux env ast =
     match ast with
     | Int _ -> ast
@@ -183,25 +183,25 @@ let analyze ast =
     | LetVar (varname, lhs, rhs) ->
       let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, (aux env lhs), (aux env' rhs))
-    | LetRec (funcname, argname, func, body) ->   (* TODO: allow recursion *)
+    | LetFunc (funcname, argname, func, body) ->   (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
       let env' = {env with symbols = HashMap.add argname (Var argname) env.symbols} in
       let func = aux env' func in
       let env' = {env with symbols = HashMap.add funcname (Var gen_funcname) env.symbols} in
-      let ast = LetRec (gen_funcname, argname, func, aux env' body) in
-      letrecs := ast::(!letrecs);
+      let ast = LetFunc (gen_funcname, argname, func, aux env' body) in
+      letfuncs := ast::(!letfuncs);
       ast
   in
 
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
-  let ast = LetRec ("aqaml_main", "aqaml_main_dummy", ast, Int 0) in
-  letrecs := ast::(!letrecs);
-  !letrecs
+  let ast = LetFunc ("aqaml_main", "aqaml_main_dummy", ast, Int 0) in
+  letfuncs := ast::(!letfuncs);
+  !letfuncs
 ;;
 
 type gen_environment = {offset: int; varoffset: int HashMap.t};;
-let rec generate letrecs =
+let rec generate letfuncs =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let stack_size = ref 0 in
@@ -275,7 +275,7 @@ let rec generate letrecs =
         "pop rax";
         sprintf "mov [rbp + %d], rax" offset;
         aux env rhs ]
-    | LetRec (funcname, _, _, body) ->
+    | LetFunc (funcname, _, _, body) ->
       let offset = env.offset - 8 in
       stack_size := max !stack_size (-offset);
       let env = {offset; varoffset = HashMap.add funcname offset env.varoffset} in
@@ -285,7 +285,7 @@ let rec generate letrecs =
         aux env body ]
     | _ -> failwith "unexpected ast" in
 
-  let letrecs_code = String.concat "\n" (List.map (fun (LetRec (funcname, argname, func, _)) ->
+  let letfuncs_code = String.concat "\n" (List.map (fun (LetFunc (funcname, argname, func, _)) ->
       let arg_offset = -8 in
       let env = {offset = arg_offset; varoffset = HashMap.singleton argname arg_offset} in
       stack_size := -arg_offset;
@@ -300,14 +300,15 @@ let rec generate letrecs =
         "pop rax";
         "mov rsp, rbp";
         "pop rbp";
-        "ret\n" ]) letrecs) in
+        "ret\n" ]) letfuncs) in
+
   let main_code = String.concat "\n" [
       "main:";
       "call aqaml_main";
       "sar rax, 1";
       "ret\n\n" ] in
 
-  main_code ^ letrecs_code
+  main_code ^ letfuncs_code
 ;;
 
 let ast = parse (tokenize 0) in
