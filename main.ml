@@ -191,16 +191,17 @@ let analyze ast =
   (ast, !letrecs)
 ;;
 
+type gen_environment = {offset: int; varoffset: int HashMap.t};;
 let rec generate (ast, letrecs) =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
-  let varoffset = ref (Hashtbl.create 16) in
-  let offset = ref 0 in
-  let rec aux ast = match ast with
+  let stack_size = ref 0 in
+
+  let rec aux env ast = match ast with
     | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
     | Add (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
+        aux env lhs;
+        aux env rhs;
         "pop rdi";
         untag_int "rdi";
         "pop rax";
@@ -209,8 +210,8 @@ let rec generate (ast, letrecs) =
         tag_int "rax";
         "push rax" ]
     | Sub (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
+        aux env lhs;
+        aux env rhs;
         "pop rdi";
         untag_int "rdi";
         "pop rax";
@@ -219,8 +220,8 @@ let rec generate (ast, letrecs) =
         tag_int "rax";
         "push rax" ]
     | Mul (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
+        aux env lhs;
+        aux env rhs;
         "pop rdi";
         untag_int "rdi";
         "pop rax";
@@ -229,8 +230,8 @@ let rec generate (ast, letrecs) =
         tag_int "rax";
         "push rax" ]
     | Div (lhs, rhs) -> String.concat "\n" [
-        aux lhs;
-        aux rhs;
+        aux env lhs;
+        aux env rhs;
         "pop rdi";
         untag_int "rdi";
         "pop rax";
@@ -240,13 +241,13 @@ let rec generate (ast, letrecs) =
         tag_int "rax";
         "push rax" ]
     | Var varname ->
-      let offset = Hashtbl.find !varoffset varname in
+      let offset = HashMap.find varname env.varoffset in
       String.concat "\n" [
         sprintf "mov rax, [rbp + %d]" offset;
         "push rax" ]
     | FuncCall (func, args) -> String.concat "\n" [
-        aux func;
-        String.concat "\n" (List.map aux args);
+        aux env func;
+        String.concat "\n" (List.map (aux env) args);
         String.concat "\n" (
           List.map (fun (_, reg) -> "pop " ^ reg) (
             List.filter (fun (index, reg) -> index < List.length args) [
@@ -256,31 +257,33 @@ let rec generate (ast, letrecs) =
         "call r10";
         "push rax" ]
     | LetVar (varname, lhs, rhs) ->
-      let lhs_code = aux lhs in
-      offset := !offset - 8;
-      let offset = !offset in
-      Hashtbl.add !varoffset varname offset;
+      let lhs_code = aux env lhs in
+      let offset = env.offset - 8 in
+      stack_size := max !stack_size (-offset);
+      let env = {offset; varoffset = HashMap.add varname offset env.varoffset} in
       String.concat "\n" [
         lhs_code;
         "pop rax";
         sprintf "mov [rbp + %d], rax" offset;
-        aux rhs ]
+        aux env rhs ]
     | LetRec (funcname, _, _, body) ->
-      offset := !offset - 8;
-      let offset = !offset in
-      Hashtbl.add !varoffset funcname offset;
+      let offset = env.offset - 8 in
+      stack_size := max !stack_size (-offset);
+      let env = {offset; varoffset = HashMap.add funcname offset env.varoffset} in
       String.concat "\n" [
         sprintf "lea rax, [rip + %s]" funcname;
         sprintf "mov [rbp + %d], rax" offset;
-        aux body ]
+        aux env body ]
     | _ -> failwith "unexpected ast" in
 
-  let code = aux ast in
+  let env = {offset = 0; varoffset = HashMap.empty} in
+  stack_size := 0;
+  let code = aux env ast in
   let main_code = String.concat "\n" [
       "main:";
       "push rbp";
       "mov rbp, rsp";
-      sprintf "add rsp, %d" !offset;
+      sprintf "sub rsp, %d" !stack_size;
       code;
       "pop rax";
       "sar rax, 1";
@@ -288,16 +291,15 @@ let rec generate (ast, letrecs) =
       "pop rbp";
       "ret\n" ] in
   let letrecs_code = String.concat "\n" (List.map (fun (LetRec (funcname, argname, func, _)) ->
-      varoffset := Hashtbl.create 16;
-      offset := -8;
-      let arg_offset = !offset in
-      Hashtbl.add !varoffset argname arg_offset;
-      let code = aux func in
+      let arg_offset = -8 in
+      let env = {offset = arg_offset; varoffset = HashMap.singleton argname arg_offset} in
+      stack_size := -arg_offset;
+      let code = aux env func in
       String.concat "\n" [
         funcname ^ ":";
         "push rbp";
         "mov rbp, rsp";
-        sprintf "add rsp, %d" !offset;
+        sprintf "sub rsp, %d" !stack_size;
         sprintf "mov [rbp + %d], rax" arg_offset;
         code;
         "pop rax";
