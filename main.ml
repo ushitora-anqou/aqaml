@@ -151,7 +151,7 @@ let parse tokens =
           (tokens, LetVar (varname, lhs, rhs))
         | _ -> failwith "unexpected token"
       end
-    | Let::Rec::(Ident funcname)::tokens ->
+    | Let::(Ident funcname)::tokens ->
       let rec aux = function
         | (Ident argname)::tokens ->
           let (tokens, args) = aux tokens in

@@ -30,12 +30,12 @@ test_aqaml "let x = 1 in let y = 2 in x + y" 3
 test_aqaml "let x = 1 in let y = 2 in let z = 3 in let w = x + y * z in w * 2" 14
 test_aqaml "let x = 1 in let x = x + 1 in x" 2
 test_aqaml "let x = (let y = 2 in y + 2) in x + 2" 6
-test_aqaml "let rec id x = x in id 10" 10
-test_aqaml "let rec id x = x in id (id 10)" 10
-test_aqaml "let rec id x = x in 1 + id 2 + 3" 6
-test_aqaml "let rec add1 x = x + 1 in add1 2 * 3" 9
-test_aqaml "let rec add1 x = x + 1 in add1 (2 * 3)" 7
-test_aqaml "let rec add1 x = x + 1 in let rec add1 x = x + 2 in add1 2" 4
-test_aqaml "let rec add x y = x + y in add 2 3" 5
-test_aqaml "let rec add x y = x + y in add (add 2 3) (add 3 4)" 12
-test_aqaml "let rec add x y = x + y in 2 * add (add 2 3) (add 3 4)" 24
+test_aqaml "let id x = x in id 10" 10
+test_aqaml "let id x = x in id (id 10)" 10
+test_aqaml "let id x = x in 1 + id 2 + 3" 6
+test_aqaml "let add1 x = x + 1 in add1 2 * 3" 9
+test_aqaml "let add1 x = x + 1 in add1 (2 * 3)" 7
+test_aqaml "let add1 x = x + 1 in let add1 x = x + 2 in add1 2" 4
+test_aqaml "let add x y = x + y in add 2 3" 5
+test_aqaml "let add x y = x + y in add (add 2 3) (add 3 4)" 12
+test_aqaml "let add x y = x + y in 2 * add (add 2 3) (add 3 4)" 24
