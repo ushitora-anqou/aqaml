@@ -151,12 +151,19 @@ let parse tokens =
           (tokens, LetVar (varname, lhs, rhs))
         | _ -> failwith "unexpected token"
       end
-    | Let::Rec::(Ident funcname)::(Ident argname)::Equal::tokens ->
+    | Let::Rec::(Ident funcname)::tokens ->
+      let rec aux = function
+        | (Ident argname)::tokens ->
+          let (tokens, args) = aux tokens in
+          (tokens, argname::args)
+        | Equal::tokens -> (tokens, [])
+        | _ -> failwith "unexpected token" in
+      let (tokens, args) = aux tokens in
       let (tokens, func) = parse_expression tokens in
       begin match tokens with
         | In::tokens ->
           let (tokens, body) = parse_expression tokens in
-          (tokens, LetFunc (funcname, [argname], func, body))
+          (tokens, LetFunc (funcname, args, func, body))
         | _ -> failwith "unexpected token"
       end
     | _ -> parse_additive tokens
@@ -178,17 +185,23 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Var name -> HashMap.find name env.symbols
+    | Var name ->
+      begin
+        try HashMap.find name env.symbols
+        with Not_found -> failwith (sprintf "not found in analysis: %s" name)
+      end
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
     | LetVar (varname, lhs, rhs) ->
       let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, (aux env lhs), (aux env' rhs))
-    | LetFunc (funcname, [argname], func, body) ->   (* TODO: allow recursion *)
+    | LetFunc (funcname, args, func, body) ->   (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
-      let env' = {env with symbols = HashMap.add argname (Var argname) env.symbols} in
+      let env' = {env with
+                  symbols = List.fold_left
+                      (fun symbols arg -> HashMap.add arg (Var arg) symbols) env.symbols args} in
       let func = aux env' func in
       let env' = {env with symbols = HashMap.add funcname (Var gen_funcname) env.symbols} in
-      let ast = LetFunc (gen_funcname, [argname], func, aux env' body) in
+      let ast = LetFunc (gen_funcname, args, func, aux env' body) in
       letfuncs := ast::(!letfuncs);
       ast
   in
@@ -250,10 +263,14 @@ let rec generate letfuncs =
         tag_int "rax";
         "push rax" ]
     | Var varname ->
-      let offset = HashMap.find varname env.varoffset in
-      String.concat "\n" [
-        sprintf "mov rax, [rbp + %d]" offset;
-        "push rax" ]
+      begin
+        try
+          let offset = HashMap.find varname env.varoffset in
+          String.concat "\n" [
+            sprintf "mov rax, [rbp + %d]" offset;
+            "push rax" ]
+        with Not_found -> failwith (sprintf "not found in analysis: %s" varname)
+      end
     | FuncCall (func, args) -> String.concat "\n" [
         aux env func;
         String.concat "\n" (List.map (aux env) args);
@@ -285,17 +302,25 @@ let rec generate letfuncs =
         aux env body ]
     | _ -> failwith "unexpected ast" in
 
-  let letfuncs_code = String.concat "\n" (List.map (fun (LetFunc (funcname, [argname], func, _)) ->
-      let arg_offset = -8 in
-      let env = {offset = arg_offset; varoffset = HashMap.singleton argname arg_offset} in
-      stack_size := -arg_offset;
+  let letfuncs_code = String.concat "\n" (List.map (fun (LetFunc (funcname, args, func, _)) ->
+      let env = {offset = 0; varoffset = HashMap.empty} in
+      let env = List.fold_left
+          (fun env argname ->
+             let offset = env.offset - 8 in
+             let varoffset = HashMap.add argname offset env.varoffset in
+             {offset; varoffset}) env args in
+      stack_size := -env.offset;
       let code = aux env func in
       String.concat "\n" [
         funcname ^ ":";
         "push rbp";
         "mov rbp, rsp";
         sprintf "sub rsp, %d" !stack_size;
-        sprintf "mov [rbp + %d], rax" arg_offset;
+        String.concat "\n" (
+          List.map (fun (i, reg) -> sprintf "mov [rbp - %d], %s" ((i + 1) * 8) reg) (
+            List.filter (fun (index, reg) -> index < List.length args) [
+              (0, "rax"); (1, "rbx"); (2, "rdi"); (3, "rsi"); (4, "rdx");
+              (5, "rcx"); (6, "r8"); (7, "r9"); (8, "r12"); (9, "r13") ]));
         code;
         "pop rax";
         "mov rsp, rbp";
