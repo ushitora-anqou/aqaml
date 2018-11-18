@@ -90,7 +90,7 @@ type ast =
   | Var of (string)
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
-  | LetFunc of (string * string * ast * ast)
+  | LetFunc of (string * string list * ast * ast)
 ;;
 
 let parse tokens =
@@ -156,7 +156,7 @@ let parse tokens =
       begin match tokens with
         | In::tokens ->
           let (tokens, body) = parse_expression tokens in
-          (tokens, LetFunc (funcname, argname, func, body))
+          (tokens, LetFunc (funcname, [argname], func, body))
         | _ -> failwith "unexpected token"
       end
     | _ -> parse_additive tokens
@@ -183,19 +183,19 @@ let analyze ast =
     | LetVar (varname, lhs, rhs) ->
       let env' = {env with symbols = HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, (aux env lhs), (aux env' rhs))
-    | LetFunc (funcname, argname, func, body) ->   (* TODO: allow recursion *)
+    | LetFunc (funcname, [argname], func, body) ->   (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
       let env' = {env with symbols = HashMap.add argname (Var argname) env.symbols} in
       let func = aux env' func in
       let env' = {env with symbols = HashMap.add funcname (Var gen_funcname) env.symbols} in
-      let ast = LetFunc (gen_funcname, argname, func, aux env' body) in
+      let ast = LetFunc (gen_funcname, [argname], func, aux env' body) in
       letfuncs := ast::(!letfuncs);
       ast
   in
 
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
-  let ast = LetFunc ("aqaml_main", "aqaml_main_dummy", ast, Int 0) in
+  let ast = LetFunc ("aqaml_main", ["aqaml_main_dummy"], ast, Int 0) in
   letfuncs := ast::(!letfuncs);
   !letfuncs
 ;;
@@ -285,7 +285,7 @@ let rec generate letfuncs =
         aux env body ]
     | _ -> failwith "unexpected ast" in
 
-  let letfuncs_code = String.concat "\n" (List.map (fun (LetFunc (funcname, argname, func, _)) ->
+  let letfuncs_code = String.concat "\n" (List.map (fun (LetFunc (funcname, [argname], func, _)) ->
       let arg_offset = -8 in
       let env = {offset = arg_offset; varoffset = HashMap.singleton argname arg_offset} in
       stack_size := -arg_offset;
