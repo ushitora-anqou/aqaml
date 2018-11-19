@@ -367,7 +367,7 @@ let rec generate letfuncs =
     | FuncCall (func, args) ->
       String.concat "\n"
         [ aux env func
-        ; String.concat "\n" (List.map (aux env) args)
+        ; String.concat "\n" (List.map (aux env) (List.rev args))
         ; String.concat "\n"
             (List.map
                (fun (_, reg) -> "pop " ^ reg)

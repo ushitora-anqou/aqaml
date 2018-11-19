@@ -49,4 +49,5 @@ if 4 * 3 = 1 + 2 then
 else
     let f x y = x * y in
     f 3 2" 6
-
+test_aqaml "let sub x y = x - y in sub 3 2" 1
+test_aqaml "let calc x y z = y * z - x * x in calc 2 3 4" 8
