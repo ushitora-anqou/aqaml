@@ -188,24 +188,20 @@ let analyze ast =
           failwith (sprintf "not found in analysis: %s" name) )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
     | LetVar (varname, lhs, rhs) ->
-      let env' =
-        {env with symbols= HashMap.add varname (Var varname) env.symbols}
-      in
+      let env' = {symbols= HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, aux env lhs, aux env' rhs)
     | LetFunc (funcname, args, func, body) ->
       (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
       let env' =
-        { env with
-          symbols=
+        { symbols=
             List.fold_left
               (fun symbols arg -> HashMap.add arg (Var arg) symbols)
               env.symbols args }
       in
       let func = aux env' func in
       let env' =
-        { env with
-          symbols= HashMap.add funcname (Var gen_funcname) env.symbols }
+        {symbols= HashMap.add funcname (Var gen_funcname) env.symbols}
       in
       let ast = LetFunc (gen_funcname, args, func, aux env' body) in
       letfuncs := ast :: !letfuncs ;
@@ -321,49 +317,53 @@ let rec generate letfuncs =
         [ sprintf "lea rax, [rip + %s]" funcname
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env body ]
-    | _ -> failwith "unexpected ast"
+        (* | _ -> failwith "unexpected ast" *)
   in
   let letfuncs_code =
     String.concat "\n"
       (List.map
-         (fun (LetFunc (funcname, args, func, _)) ->
-            let env = {offset= 0; varoffset= HashMap.empty} in
-            let env =
-              List.fold_left
-                (fun env argname ->
-                   let offset = env.offset - 8 in
-                   let varoffset = HashMap.add argname offset env.varoffset in
-                   {offset; varoffset} )
-                env args
-            in
-            stack_size := -env.offset ;
-            let code = aux env func in
-            String.concat "\n"
-              [ funcname ^ ":"
-              ; "push rbp"
-              ; "mov rbp, rsp"
-              ; sprintf "sub rsp, %d" !stack_size
-              ; String.concat "\n"
-                  (List.map
-                     (fun (i, reg) ->
-                        sprintf "mov [rbp - %d], %s" ((i + 1) * 8) reg )
-                     (List.filter
-                        (fun (index, reg) -> index < List.length args)
-                        [ (0, "rax")
-                        ; (1, "rbx")
-                        ; (2, "rdi")
-                        ; (3, "rsi")
-                        ; (4, "rdx")
-                        ; (5, "rcx")
-                        ; (6, "r8")
-                        ; (7, "r9")
-                        ; (8, "r12")
-                        ; (9, "r13") ]))
-              ; code
-              ; "pop rax"
-              ; "mov rsp, rbp"
-              ; "pop rbp"
-              ; "ret\n" ] )
+         (function
+           | LetFunc (funcname, args, func, _) ->
+             let env = {offset= 0; varoffset= HashMap.empty} in
+             let env =
+               List.fold_left
+                 (fun env argname ->
+                    let offset = env.offset - 8 in
+                    let varoffset =
+                      HashMap.add argname offset env.varoffset
+                    in
+                    {offset; varoffset} )
+                 env args
+             in
+             stack_size := -env.offset ;
+             let code = aux env func in
+             String.concat "\n"
+               [ funcname ^ ":"
+               ; "push rbp"
+               ; "mov rbp, rsp"
+               ; sprintf "sub rsp, %d" !stack_size
+               ; String.concat "\n"
+                   (List.map
+                      (fun (i, reg) ->
+                         sprintf "mov [rbp - %d], %s" ((i + 1) * 8) reg )
+                      (List.filter
+                         (fun (index, reg) -> index < List.length args)
+                         [ (0, "rax")
+                         ; (1, "rbx")
+                         ; (2, "rdi")
+                         ; (3, "rsi")
+                         ; (4, "rdx")
+                         ; (5, "rcx")
+                         ; (6, "r8")
+                         ; (7, "r9")
+                         ; (8, "r12")
+                         ; (9, "r13") ]))
+               ; code
+               ; "pop rax"
+               ; "mov rsp, rbp"
+               ; "pop rbp"
+               ; "ret\n" ]
+           | _ -> failwith "LetFunc should be here")
          letfuncs)
   in
   let main_code =
