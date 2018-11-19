@@ -12,7 +12,14 @@ let make_id base =
   id_counter := !id_counter + 1 ;
   sprintf "%s.%d" base !id_counter
 
-let program = read_line ()
+let program =
+  let rec aux lines =
+    try
+      let line = read_line () in
+      aux (line :: lines)
+    with End_of_file -> lines
+  in
+  String.concat "\n" (List.rev (aux []))
 
 type token =
   | IntLiteral of int
@@ -61,7 +68,7 @@ let rec tokenize i =
   try
     let i, ch = next_char i in
     match ch with
-    | ' ' | '\t' | '\n' -> tokenize i
+    | ' ' | '\t' | '\n' | '\r' -> tokenize i
     | '0' .. '9' ->
       let i, num = next_int (i - 1) 0 in
       IntLiteral num :: tokenize i

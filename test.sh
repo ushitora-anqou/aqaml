@@ -42,5 +42,11 @@ test_aqaml "let add x y = x + y in 2 * add (add 2 3) (add 3 4)" 24
 test_aqaml "if 1 = 1 then 1 else 0" 1
 test_aqaml "if 2 = 1 then 1 else 0" 0
 test_aqaml "let add x y = x + y in if (add 2 3) = (add 3 2) then 1 else 0" 1
-test_aqaml "if 4 * 3 = 1 + 2 then let f x y = x + y in f 3 2 else let f x y = x * y in f 3 2" 6
+test_aqaml "
+if 4 * 3 = 1 + 2 then
+    let f x y = x + y in
+    f 3 2
+else
+    let f x y = x * y in
+    f 3 2" 6
 
