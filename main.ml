@@ -129,7 +129,7 @@ let rec tokenize i =
   with EOF -> []
 
 type ast =
-  | Int of int
+  | IntValue of int
   | Add of (ast * ast)
   | Sub of (ast * ast)
   | Mul of (ast * ast)
@@ -148,7 +148,7 @@ exception Unexpected_token
 
 let parse tokens =
   let rec parse_primary = function
-    | IntLiteral num :: tokens -> (tokens, Int num)
+    | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
@@ -284,7 +284,7 @@ let analyze ast =
   let letfuncs = ref [] in
   let rec aux env ast =
     match ast with
-    | Int _ -> ast
+    | IntValue _ -> ast
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
@@ -328,7 +328,9 @@ let analyze ast =
   in
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
-  let ast = LetFunc (false, "aqaml_main", ["aqaml_main_dummy"], ast, Int 0) in
+  let ast =
+    LetFunc (false, "aqaml_main", ["aqaml_main_dummy"], ast, IntValue 0)
+  in
   letfuncs := ast :: !letfuncs ;
   !letfuncs
 
@@ -339,7 +341,7 @@ let rec generate letfuncs =
   let untag_int reg = sprintf "sar %s, 1" reg in
   let stack_size = ref 0 in
   let rec aux env = function
-    | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
+    | IntValue num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
     | Add (lhs, rhs) ->
       String.concat "\n"
         [ aux env lhs
