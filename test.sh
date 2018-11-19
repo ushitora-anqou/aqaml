@@ -57,3 +57,7 @@ test_aqaml "let rec trib n = if n = 0 then 0 else if n = 1 then 0 else if n = 2 
 test_aqaml "let rec lucas n = if n = 0 then 2 else if n = 1 then 1 else lucas (n - 1) + lucas (n - 2) in lucas 11" 199
 test_aqaml "if 1 <> 2 then 1 else 0" 1
 test_aqaml "if 1 <> 1 then 1 else 0" 0
+test_aqaml "if 1 < 2 then 1 else 0" 1
+test_aqaml "if 2 < 1 then 1 else 0" 0
+test_aqaml "if 1 > 2 then 1 else 0" 0
+test_aqaml "if 2 > 1 then 1 else 0" 1

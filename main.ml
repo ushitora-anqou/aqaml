@@ -136,6 +136,7 @@ type ast =
   | Div of (ast * ast)
   | StructEqual of (ast * ast)
   | StructInequal of (ast * ast)
+  | LessThan of (ast * ast)
   | IfThenElse of (ast * ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
@@ -203,6 +204,12 @@ let parse tokens =
       | LTGT :: tokens ->
         let tokens, rhs = parse_additive tokens in
         aux (StructInequal (lhs, rhs)) tokens
+      | LT :: tokens ->
+        let tokens, rhs = parse_additive tokens in
+        aux (LessThan (lhs, rhs)) tokens
+      | GT :: tokens ->
+        let tokens, rhs = parse_additive tokens in
+        aux (LessThan (rhs, lhs)) tokens
       | _ -> (tokens, lhs)
     in
     let tokens, ast = parse_additive tokens in
@@ -277,6 +284,7 @@ let analyze ast =
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
     | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
+    | LessThan (lhs, rhs) -> LessThan (aux env lhs, aux env rhs)
     | IfThenElse (cond, then_body, else_body) ->
       IfThenElse (aux env cond, aux env then_body, aux env else_body)
     | Var name -> (
@@ -388,6 +396,17 @@ let rec generate letfuncs =
         ; "pop rax"
         ; "cmp rax, rdi"
         ; "setne al"
+        ; "movzx rax, al"
+        ; tag_int "rax"
+        ; "push rax" ]
+    | LessThan (lhs, rhs) ->
+      String.concat "\n"
+        [ aux env lhs
+        ; aux env rhs
+        ; "pop rdi"
+        ; "pop rax"
+        ; "cmp rax, rdi"
+        ; "setl al"
         ; "movzx rax, al"
         ; tag_int "rax"
         ; "push rax" ]
