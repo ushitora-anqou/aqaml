@@ -52,8 +52,8 @@ else
 test_aqaml "let sub x y = x - y in sub 3 2" 1
 test_aqaml "let calc x y z = y * z - x * x in calc 2 3 4" 8
 test_aqaml "let rec pow n m = if m = 0 then 1 else pow n (m - 1) * n in pow 2 6" 64
-test_aqaml "let rec fib n = if n = 0 then 0 else if n = 1 then 1 else fib (n - 1) + fib (n - 2) in fib 13" 233
-test_aqaml "let rec trib n = if n = 0 then 0 else if n = 1 then 0 else if n = 2 then 1 else trib (n - 1) + trib (n - 2) + trib (n - 3) in trib 11" 149
+test_aqaml "let rec fib n = if n <= 1 then n else fib (n - 1) + fib (n - 2) in fib 13" 233
+test_aqaml "let rec trib n = if n <= 1 then 0 else if n = 2 then 1 else trib (n - 1) + trib (n - 2) + trib (n - 3) in trib 11" 149
 test_aqaml "let rec lucas n = if n = 0 then 2 else if n = 1 then 1 else lucas (n - 1) + lucas (n - 2) in lucas 11" 199
 test_aqaml "if 1 <> 2 then 1 else 0" 1
 test_aqaml "if 1 <> 1 then 1 else 0" 0
@@ -61,3 +61,8 @@ test_aqaml "if 1 < 2 then 1 else 0" 1
 test_aqaml "if 2 < 1 then 1 else 0" 0
 test_aqaml "if 1 > 2 then 1 else 0" 0
 test_aqaml "if 2 > 1 then 1 else 0" 1
+test_aqaml "if 1 <= 2 then 1 else 0" 1
+test_aqaml "if 2 <= 1 then 1 else 0" 0
+test_aqaml "if 1 <= 1 then 1 else 0" 1
+test_aqaml "if 1 >= 2 then 1 else 0" 0
+test_aqaml "if 1 >= 1 then 1 else 0" 1
