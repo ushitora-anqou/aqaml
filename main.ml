@@ -27,6 +27,9 @@ type token =
   | Equal
   | In
   | Rec
+  | If
+  | Then
+  | Else
 
 exception EOF
 
@@ -70,6 +73,9 @@ let rec tokenize i =
         | "rec" -> Rec
         | "true" -> IntLiteral 1 (* TODO: boolean type *)
         | "false" -> IntLiteral 0
+        | "if" -> If
+        | "then" -> Then
+        | "else" -> Else
         | _ -> Ident str )
       :: tokenize i
     | '+' -> Plus :: tokenize i
@@ -89,6 +95,7 @@ type ast =
   | Mul of (ast * ast)
   | Div of (ast * ast)
   | StructEqual of (ast * ast)
+  | IfThenElse of (ast * ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
@@ -154,6 +161,19 @@ let parse tokens =
     in
     let tokens, ast = parse_additive tokens in
     aux ast tokens
+  and parse_if = function
+    | If :: tokens -> (
+        let tokens, cond = parse_expression tokens in
+        match tokens with
+        | Then :: tokens -> (
+            let tokens, then_body = parse_expression tokens in
+            match tokens with
+            | Else :: tokens ->
+              let tokens, else_body = parse_expression tokens in
+              (tokens, IfThenElse (cond, then_body, else_body))
+            | _ -> failwith "unexpected token" )
+        | _ -> failwith "unexpected token" )
+    | tokens -> parse_structural_equal tokens
   and parse_let tokens =
     match tokens with
     | Let :: Ident varname :: Equal :: tokens -> (
@@ -178,7 +198,7 @@ let parse tokens =
           let tokens, body = parse_expression tokens in
           (tokens, LetFunc (funcname, args, func, body))
         | _ -> failwith "unexpected token" )
-    | _ -> parse_structural_equal tokens
+    | _ -> parse_if tokens
   and parse_expression tokens = parse_let tokens in
   let tokens, ast = parse_expression tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
@@ -197,6 +217,8 @@ let analyze ast =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
+    | IfThenElse (cond, then_body, else_body) ->
+      IfThenElse (aux env cond, aux env then_body, aux env else_body)
     | Var name -> (
         try HashMap.find name env.symbols with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) )
@@ -233,8 +255,7 @@ let rec generate letfuncs =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let stack_size = ref 0 in
-  let rec aux env ast =
-    match ast with
+  let rec aux env = function
     | Int num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
     | Add (lhs, rhs) ->
       String.concat "\n"
@@ -292,6 +313,19 @@ let rec generate letfuncs =
         ; "movzx rax, al"
         ; tag_int "rax"
         ; "push rax" ]
+    | IfThenElse (cond, then_body, else_body) ->
+      let false_label = make_id ".L" in
+      let exit_label = make_id ".L" in
+      String.concat "\n"
+        [ aux env cond
+        ; "pop rax"
+        ; "cmp rax, 1" (* if rax = 0 then then_body else else_body *)
+        ; sprintf "je %s" false_label
+        ; aux env then_body
+        ; sprintf "jmp %s" exit_label
+        ; sprintf "%s:" false_label
+        ; aux env else_body
+        ; sprintf "%s:" exit_label ]
     | Var varname -> (
         try
           let offset = HashMap.find varname env.varoffset in
