@@ -131,6 +131,8 @@ type ast =
   | LetVar of (string * ast * ast)
   | LetFunc of (string * string list * ast * ast)
 
+exception Unexpected_token
+
 let parse tokens =
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, Int num)
@@ -139,8 +141,8 @@ let parse tokens =
         let tokens, ast = parse_expression tokens in
         match tokens with
         | RParen :: tokens -> (tokens, ast)
-        | _ -> failwith "unexpected token" )
-    | _ -> failwith "unexpected token"
+        | _ -> raise Unexpected_token )
+    | _ -> raise Unexpected_token
   and parse_funccall tokens =
     let rec aux tokens =
       match tokens with
@@ -201,8 +203,8 @@ let parse tokens =
             | Else :: tokens ->
               let tokens, else_body = parse_expression tokens in
               (tokens, IfThenElse (cond, then_body, else_body))
-            | _ -> failwith "unexpected token" )
-        | _ -> failwith "unexpected token" )
+            | _ -> raise Unexpected_token )
+        | _ -> raise Unexpected_token )
     | tokens -> parse_structural_equal tokens
   and parse_let tokens =
     match tokens with
@@ -212,14 +214,14 @@ let parse tokens =
         | In :: tokens ->
           let tokens, rhs = parse_expression tokens in
           (tokens, LetVar (varname, lhs, rhs))
-        | _ -> failwith "unexpected token" )
+        | _ -> raise Unexpected_token )
     | Let :: Ident funcname :: tokens -> (
         let rec aux = function
           | Ident argname :: tokens ->
             let tokens, args = aux tokens in
             (tokens, argname :: args)
           | Equal :: tokens -> (tokens, [])
-          | _ -> failwith "unexpected token"
+          | _ -> raise Unexpected_token
         in
         let tokens, args = aux tokens in
         let tokens, func = parse_expression tokens in
@@ -227,7 +229,7 @@ let parse tokens =
         | In :: tokens ->
           let tokens, body = parse_expression tokens in
           (tokens, LetFunc (funcname, args, func, body))
-        | _ -> failwith "unexpected token" )
+        | _ -> raise Unexpected_token )
     | _ -> parse_if tokens
   and parse_expression tokens = parse_let tokens in
   let tokens, ast = parse_expression tokens in
