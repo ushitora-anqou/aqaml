@@ -129,7 +129,7 @@ type ast =
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
-  | LetFunc of (string * string list * ast * ast)
+  | LetFunc of (bool * string * string list * ast * ast)
 
 exception Unexpected_token
 
@@ -206,31 +206,44 @@ let parse tokens =
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
     | tokens -> parse_structural_equal tokens
-  and parse_let tokens =
-    match tokens with
-    | Let :: Ident varname :: Equal :: tokens -> (
-        let tokens, lhs = parse_expression tokens in
-        match tokens with
-        | In :: tokens ->
-          let tokens, rhs = parse_expression tokens in
-          (tokens, LetVar (varname, lhs, rhs))
-        | _ -> raise Unexpected_token )
-    | Let :: Ident funcname :: tokens -> (
-        let rec aux = function
-          | Ident argname :: tokens ->
-            let tokens, args = aux tokens in
-            (tokens, argname :: args)
-          | Equal :: tokens -> (tokens, [])
+  and parse_let = function
+    | Let :: tokens -> (
+        let tokens, recursive =
+          match tokens with
+          | Rec :: tokens -> (tokens, true)
+          | _ -> (tokens, false)
+        in
+        let tokens, name =
+          match tokens with
+          | Ident name :: tokens -> (tokens, name)
           | _ -> raise Unexpected_token
         in
-        let tokens, args = aux tokens in
-        let tokens, func = parse_expression tokens in
         match tokens with
-        | In :: tokens ->
-          let tokens, body = parse_expression tokens in
-          (tokens, LetFunc (funcname, args, func, body))
-        | _ -> raise Unexpected_token )
-    | _ -> parse_if tokens
+        | Equal :: tokens -> (
+            (* define constant *)
+            let tokens, lhs = parse_expression tokens in
+            match tokens with
+            | In :: tokens ->
+              let tokens, rhs = parse_expression tokens in
+              (tokens, LetVar (name, lhs, rhs))
+            | _ -> raise Unexpected_token )
+        | _ -> (
+            (* define function *)
+            let rec aux = function
+              | Ident argname :: tokens ->
+                let tokens, args = aux tokens in
+                (tokens, argname :: args)
+              | Equal :: tokens -> (tokens, [])
+              | _ -> raise Unexpected_token
+            in
+            let tokens, args = aux tokens in
+            let tokens, func = parse_expression tokens in
+            match tokens with
+            | In :: tokens ->
+              let tokens, body = parse_expression tokens in
+              (tokens, LetFunc (recursive, name, args, func, body))
+            | _ -> raise Unexpected_token ) )
+    | tokens -> parse_if tokens
   and parse_expression tokens = parse_let tokens in
   let tokens, ast = parse_expression tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
@@ -258,26 +271,33 @@ let analyze ast =
     | LetVar (varname, lhs, rhs) ->
       let env' = {symbols= HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, aux env lhs, aux env' rhs)
-    | LetFunc (funcname, args, func, body) ->
+    | LetFunc (recursive, funcname, args, func, body) ->
       (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
+      let funcvar = Var gen_funcname in
       let env' =
         { symbols=
             List.fold_left
               (fun symbols arg -> HashMap.add arg (Var arg) symbols)
               env.symbols args }
       in
-      let func = aux env' func in
+      (* if recursive then funcname should be in env *)
       let env' =
-        {symbols= HashMap.add funcname (Var gen_funcname) env.symbols}
+        { symbols=
+            ( if recursive then HashMap.add funcname funcvar env'.symbols
+              else env'.symbols ) }
       in
-      let ast = LetFunc (gen_funcname, args, func, aux env' body) in
+      let func = aux env' func in
+      let env' = {symbols= HashMap.add funcname funcvar env.symbols} in
+      let ast =
+        LetFunc (recursive, gen_funcname, args, func, aux env' body)
+      in
       letfuncs := ast :: !letfuncs ;
       ast
   in
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
-  let ast = LetFunc ("aqaml_main", ["aqaml_main_dummy"], ast, Int 0) in
+  let ast = LetFunc (false, "aqaml_main", ["aqaml_main_dummy"], ast, Int 0) in
   letfuncs := ast :: !letfuncs ;
   !letfuncs
 
@@ -398,7 +418,7 @@ let rec generate letfuncs =
         ; "pop rax"
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env rhs ]
-    | LetFunc (funcname, _, _, body) ->
+    | LetFunc (_, funcname, _, _, body) ->
       let offset = env.offset - 8 in
       stack_size := max !stack_size (-offset) ;
       let env =
@@ -414,7 +434,7 @@ let rec generate letfuncs =
     String.concat "\n"
       (List.map
          (function
-           | LetFunc (funcname, args, func, _) ->
+           | LetFunc (recursive, funcname, args, func, _) ->
              let env = {offset= 0; varoffset= HashMap.empty} in
              let env =
                List.fold_left
@@ -425,6 +445,14 @@ let rec generate letfuncs =
                     in
                     {offset; varoffset} )
                  env args
+             in
+             (* if recursive then the function itself should be in env *)
+             let env =
+               if recursive then
+                 let offset = env.offset - 8 in
+                 { offset
+                 ; varoffset= HashMap.add funcname offset env.varoffset }
+               else env
              in
              stack_size := -env.offset ;
              let code = aux env func in
@@ -449,6 +477,10 @@ let rec generate letfuncs =
                          ; (7, "r9")
                          ; (8, "r12")
                          ; (9, "r13") ]))
+               ; ( if recursive then
+                     sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
+                       funcname env.offset
+                   else "" )
                ; code
                ; "pop rax"
                ; "mov rsp, rbp"
