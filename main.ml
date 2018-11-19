@@ -68,6 +68,8 @@ let rec tokenize i =
         | "let" -> Let
         | "in" -> In
         | "rec" -> Rec
+        | "true" -> IntLiteral 1 (* TODO: boolean type *)
+        | "false" -> IntLiteral 0
         | _ -> Ident str )
       :: tokenize i
     | '+' -> Plus :: tokenize i
@@ -86,6 +88,7 @@ type ast =
   | Sub of (ast * ast)
   | Mul of (ast * ast)
   | Div of (ast * ast)
+  | StructEqual of (ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
@@ -141,6 +144,16 @@ let parse tokens =
     in
     let tokens, ast = parse_multiplicative tokens in
     aux ast tokens
+  and parse_structural_equal tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Equal :: tokens ->
+        let tokens, rhs = parse_additive tokens in
+        aux (StructEqual (lhs, rhs)) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_additive tokens in
+    aux ast tokens
   and parse_let tokens =
     match tokens with
     | Let :: Ident varname :: Equal :: tokens -> (
@@ -165,7 +178,7 @@ let parse tokens =
           let tokens, body = parse_expression tokens in
           (tokens, LetFunc (funcname, args, func, body))
         | _ -> failwith "unexpected token" )
-    | _ -> parse_additive tokens
+    | _ -> parse_structural_equal tokens
   and parse_expression tokens = parse_let tokens in
   let tokens, ast = parse_expression tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
@@ -183,6 +196,7 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
+    | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
     | Var name -> (
         try HashMap.find name env.symbols with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) )
@@ -265,6 +279,17 @@ let rec generate letfuncs =
         ; untag_int "rax"
         ; "cqo"
         ; "idiv rdi"
+        ; tag_int "rax"
+        ; "push rax" ]
+    | StructEqual (lhs, rhs) ->
+      String.concat "\n"
+        [ aux env lhs
+        ; aux env rhs
+        ; "pop rdi"
+        ; "pop rax"
+        ; "cmp rax, rdi"
+        ; "sete al"
+        ; "movzx rax, al"
         ; tag_int "rax"
         ; "push rax" ]
     | Var varname -> (

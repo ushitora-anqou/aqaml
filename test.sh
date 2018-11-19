@@ -39,3 +39,5 @@ test_aqaml "let add1 x = x + 1 in let add1 x = x + 2 in add1 2" 4
 test_aqaml "let add x y = x + y in add 2 3" 5
 test_aqaml "let add x y = x + y in add (add 2 3) (add 3 4)" 12
 test_aqaml "let add x y = x + y in 2 * add (add 2 3) (add 3 4)" 24
+test_aqaml "1 = 1" 1
+test_aqaml "2 = 1" 0
