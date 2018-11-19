@@ -66,3 +66,4 @@ test_aqaml "if 2 <= 1 then 1 else 0" 0
 test_aqaml "if 1 <= 1 then 1 else 0" 1
 test_aqaml "if 1 >= 2 then 1 else 0" 0
 test_aqaml "if 1 >= 1 then 1 else 0" 1
+test_aqaml "let not x = if x then false else true in if not true then 1 else 0" 0
