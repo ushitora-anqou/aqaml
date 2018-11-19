@@ -37,6 +37,9 @@ type token =
   | If
   | Then
   | Else
+  | LT
+  | GT
+  | LTGT
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -54,6 +57,9 @@ let string_of_token = function
   | If -> "if"
   | Then -> "then"
   | Else -> "else"
+  | LT -> "<"
+  | GT -> ">"
+  | LTGT -> "<>"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -114,6 +120,10 @@ let rec tokenize i =
     | '/' -> Slash :: tokenize i
     | '(' -> LParen :: tokenize i
     | ')' -> RParen :: tokenize i
+    | '<' -> (
+        let i, ch = next_char i in
+        match ch with '>' -> LTGT :: tokenize i | _ -> LT :: tokenize (i - 1) )
+    | '>' -> GT :: tokenize i
     | '=' -> Equal :: tokenize i
     | _ -> failwith (sprintf "unexpected char: '%c'" ch)
   with EOF -> []
@@ -125,6 +135,7 @@ type ast =
   | Mul of (ast * ast)
   | Div of (ast * ast)
   | StructEqual of (ast * ast)
+  | StructInequal of (ast * ast)
   | IfThenElse of (ast * ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
@@ -189,6 +200,9 @@ let parse tokens =
       | Equal :: tokens ->
         let tokens, rhs = parse_additive tokens in
         aux (StructEqual (lhs, rhs)) tokens
+      | LTGT :: tokens ->
+        let tokens, rhs = parse_additive tokens in
+        aux (StructInequal (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
     in
     let tokens, ast = parse_additive tokens in
@@ -262,6 +276,7 @@ let analyze ast =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
+    | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
     | IfThenElse (cond, then_body, else_body) ->
       IfThenElse (aux env cond, aux env then_body, aux env else_body)
     | Var name -> (
@@ -362,6 +377,17 @@ let rec generate letfuncs =
         ; "pop rax"
         ; "cmp rax, rdi"
         ; "sete al"
+        ; "movzx rax, al"
+        ; tag_int "rax"
+        ; "push rax" ]
+    | StructInequal (lhs, rhs) ->
+      String.concat "\n"
+        [ aux env lhs
+        ; aux env rhs
+        ; "pop rdi"
+        ; "pop rax"
+        ; "cmp rax, rdi"
+        ; "setne al"
         ; "movzx rax, al"
         ; tag_int "rax"
         ; "push rax" ]
