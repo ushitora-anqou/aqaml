@@ -38,6 +38,29 @@ type token =
   | Then
   | Else
 
+let string_of_token = function
+  | IntLiteral num -> string_of_int num
+  | Plus -> "+"
+  | Minus -> "-"
+  | Star -> "*"
+  | Slash -> "/"
+  | Ident str -> str
+  | LParen -> "("
+  | RParen -> ")"
+  | Let -> "let"
+  | Equal -> "="
+  | In -> "in"
+  | Rec -> "rec"
+  | If -> "if"
+  | Then -> "then"
+  | Else -> "else"
+
+let rec eprint_token_list = function
+  | token :: tokens ->
+    eprintf "%s " (string_of_token token) ;
+    eprint_token_list tokens
+  | [] -> ()
+
 exception EOF
 
 let rec tokenize i =
@@ -438,7 +461,9 @@ let rec generate letfuncs =
   main_code ^ letfuncs_code
 
 ;;
-let ast = parse (tokenize 0) in
+let tokens = tokenize 0 in
+(* eprint_token_list tokens ; *)
+let ast = parse tokens in
 let code = generate (analyze ast) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
