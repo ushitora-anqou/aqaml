@@ -40,6 +40,7 @@ type token =
   | LT
   | GT
   | LTGT
+  | Comma
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -60,6 +61,7 @@ let string_of_token = function
   | LT -> "<"
   | GT -> ">"
   | LTGT -> "<>"
+  | Comma -> ","
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -88,7 +90,7 @@ let tokenize program =
         try
           let i, ch = next_char i in
           match ch with
-          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' ->
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' ->
             Buffer.add_char buf ch ; aux i
           | _ -> (i - 1, Buffer.contents buf)
         with EOF -> (i, Buffer.contents buf)
@@ -126,6 +128,7 @@ let tokenize program =
           match ch with '>' -> LTGT :: aux i | _ -> LT :: aux (i - 1) )
       | '>' -> GT :: aux i
       | '=' -> Equal :: aux i
+      | ',' -> Comma :: aux i
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -133,6 +136,7 @@ let tokenize program =
 
 type ast =
   | IntValue of int
+  | TupleValue of ast list
   | Add of (ast * ast)
   | Sub of (ast * ast)
   | Mul of (ast * ast)
@@ -145,6 +149,7 @@ type ast =
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (string * ast * ast)
+  | LetVarTuple of (string list * ast * ast)
   | LetFunc of (bool * string * string list * ast * ast)
 
 exception Unexpected_token
@@ -224,6 +229,20 @@ let parse tokens =
     in
     let tokens, ast = parse_additive tokens in
     aux ast tokens
+  and parse_tuple tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Comma :: tokens ->
+        let tokens, rhs = parse_structural_equal tokens in
+        aux (rhs :: lhs) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_structural_equal tokens in
+    let tokens, ast_list = aux [ast] tokens in
+    match ast_list with
+    | [] -> raise Unexpected_token
+    | [ast] -> (tokens, ast)
+    | asts -> (tokens, TupleValue (List.rev asts))
   and parse_if = function
     | If :: tokens -> (
         let tokens, cond = parse_expression tokens in
@@ -236,7 +255,7 @@ let parse tokens =
               (tokens, IfThenElse (cond, then_body, else_body))
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
-    | tokens -> parse_structural_equal tokens
+    | tokens -> parse_tuple tokens
   and parse_let = function
     | Let :: tokens -> (
         let tokens, recursive =
@@ -244,38 +263,78 @@ let parse tokens =
           | Rec :: tokens -> (tokens, true)
           | _ -> (tokens, false)
         in
-        let tokens, name =
-          match tokens with
-          | Ident name :: tokens -> (tokens, name)
-          | _ -> raise Unexpected_token
-        in
-        match tokens with
-        | Equal :: tokens -> (
-            (* define constant *)
-            let tokens, lhs = parse_expression tokens in
+        let tokens, bind = parse_pattern tokens in
+        match bind with
+        | Var name -> (
             match tokens with
-            | In :: tokens ->
-              let tokens, rhs = parse_expression tokens in
-              (tokens, LetVar (name, lhs, rhs))
-            | _ -> raise Unexpected_token )
-        | _ -> (
-            (* define function *)
-            let rec aux = function
-              | Ident argname :: tokens ->
+            | Equal :: tokens -> (
+                (* define constant *)
+                let tokens, lhs = parse_expression tokens in
+                match tokens with
+                | In :: tokens ->
+                  let tokens, rhs = parse_expression tokens in
+                  (tokens, LetVar (name, lhs, rhs))
+                | _ -> raise Unexpected_token )
+            | _ -> (
+                (* define function *)
+                let rec aux = function
+                  | Ident argname :: tokens ->
+                    let tokens, args = aux tokens in
+                    (tokens, argname :: args)
+                  | Equal :: tokens -> (tokens, [])
+                  | _ -> raise Unexpected_token
+                in
                 let tokens, args = aux tokens in
-                (tokens, argname :: args)
-              | Equal :: tokens -> (tokens, [])
-              | _ -> raise Unexpected_token
+                let tokens, func = parse_expression tokens in
+                match tokens with
+                | In :: tokens ->
+                  let tokens, body = parse_expression tokens in
+                  (tokens, LetFunc (recursive, name, args, func, body))
+                | _ -> raise Unexpected_token ) )
+        | TupleValue asts -> (
+            let varnames =
+              List.map
+                (function
+                  | Var varname -> varname | _ -> raise Unexpected_token)
+                asts
             in
-            let tokens, args = aux tokens in
-            let tokens, func = parse_expression tokens in
             match tokens with
-            | In :: tokens ->
-              let tokens, body = parse_expression tokens in
-              (tokens, LetFunc (recursive, name, args, func, body))
-            | _ -> raise Unexpected_token ) )
+            | Equal :: tokens -> (
+                (* define constant (tuple) *)
+                let tokens, lhs = parse_expression tokens in
+                match tokens with
+                | In :: tokens ->
+                  let tokens, rhs = parse_expression tokens in
+                  (tokens, LetVarTuple (varnames, lhs, rhs))
+                | _ -> raise Unexpected_token )
+            | _ -> raise Unexpected_token )
+        | _ -> raise Unexpected_token )
     | tokens -> parse_if tokens
-  and parse_expression tokens = parse_let tokens in
+  and parse_expression tokens = parse_let tokens
+  and parse_pattern_primary = function
+    | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | Ident id :: tokens -> (tokens, Var id)
+    | LParen :: tokens -> (
+        let tokens, ast = parse_pattern tokens in
+        match tokens with
+        | RParen :: tokens -> (tokens, ast)
+        | _ -> raise Unexpected_token )
+    | _ -> raise Unexpected_token
+  and parse_pattern_tuple tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Comma :: tokens ->
+        let tokens, rhs = parse_pattern_primary tokens in
+        aux (rhs :: lhs) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_pattern_primary tokens in
+    let tokens, ast_list = aux [ast] tokens in
+    match ast_list with
+    | [] -> raise Unexpected_token
+    | [ast] -> (tokens, ast)
+    | asts -> (tokens, TupleValue (List.rev asts))
+  and parse_pattern tokens = parse_pattern_tuple tokens in
   let tokens, ast = parse_expression tokens in
   if tokens = [] then ast else failwith "invalid token sequence"
 
@@ -288,6 +347,7 @@ let analyze ast =
   let rec aux env ast =
     match ast with
     | IntValue _ -> ast
+    | TupleValue values -> TupleValue (List.map (aux env) values)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
@@ -305,6 +365,14 @@ let analyze ast =
     | LetVar (varname, lhs, rhs) ->
       let env' = {symbols= HashMap.add varname (Var varname) env.symbols} in
       LetVar (varname, aux env lhs, aux env' rhs)
+    | LetVarTuple (varnames, lhs, rhs) ->
+      let rec add_symbols symbols = function
+        | varname :: varnames ->
+          add_symbols (HashMap.add varname (Var varname) symbols) varnames
+        | [] -> symbols
+      in
+      let env' = {symbols= add_symbols env.symbols varnames} in
+      LetVarTuple (varnames, aux env lhs, aux env' rhs)
     | LetFunc (recursive, funcname, args, func, body) ->
       (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
@@ -345,6 +413,22 @@ let rec generate letfuncs =
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
+    | TupleValue values ->
+      (* +1 for header *)
+      let size = (List.length values + 1) * 8 in
+      String.concat "\n"
+        [ String.concat "\n" (List.map (aux env) (List.rev values))
+        ; sprintf "mov rax, %d" size
+        ; "call aqaml_malloc    /* malloc for tuple */"
+        (* size (54 bits) | color (2 bits) | tag byte (8 bits) *)
+        ; sprintf "mov DWORD PTR [rax], %d"
+            ((size lsl 10) lor (0 lsl 8) lor 1)
+        ; String.concat "\n"
+            (List.mapi
+               (fun i _ ->
+                  sprintf "pop rdi\nmov [rax + %d], rdi" ((i + 1) * 8) )
+               values)
+        ; "push rax" ]
     | Add (lhs, rhs) ->
       String.concat "\n"
         [ aux env lhs
@@ -487,6 +571,33 @@ let rec generate letfuncs =
         ; "pop rax"
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env rhs ]
+    | LetVarTuple (varnames, lhs, rhs) ->
+      let lhs_code = aux env lhs in
+      let offset = env.offset - (List.length varnames * 8) in
+      stack_size := max !stack_size (-offset) ;
+      let env' =
+        { offset
+        ; varoffset=
+            (let rec aux i varoffset = function
+                | varname :: varnames ->
+                  aux (i + 1)
+                    (HashMap.add varname (env.offset - (i * 8)) varoffset)
+                    varnames
+                | [] -> varoffset
+             in
+             aux 1 env.varoffset varnames) }
+      in
+      String.concat "\n"
+        [ lhs_code
+        ; "pop rax"
+        ; String.concat "\n"
+            (List.mapi
+               (fun i _ ->
+                  sprintf "mov rdi, [rax + %d]\nmov [rbp + %d], rdi"
+                    ((i + 1) * 8)
+                    (env.offset - ((i + 1) * 8)) )
+               varnames)
+        ; aux env' rhs ]
     | LetFunc (_, funcname, _, _, body) ->
       let offset = env.offset - 8 in
       stack_size := max !stack_size (-offset) ;
@@ -549,7 +660,7 @@ let rec generate letfuncs =
                ; ( if recursive then
                      sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
                        funcname env.offset
-                   else "" )
+                   else "nop" )
                ; code
                ; "pop rax"
                ; "mov rsp, rbp"
@@ -559,7 +670,16 @@ let rec generate letfuncs =
          letfuncs)
   in
   let main_code =
-    String.concat "\n" ["main:"; "call aqaml_main"; "sar rax, 1"; "ret\n\n"]
+    String.concat "\n"
+      [ "aqaml_malloc:"
+      ; untag_int "rax"
+      ; "mov edi, eax"
+      ; "call malloc@PLT"
+      ; "ret"
+      ; "main:"
+      ; "call aqaml_main"
+      ; "sar rax, 1"
+      ; "ret\n\n" ]
   in
   main_code ^ letfuncs_code
 
