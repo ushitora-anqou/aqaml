@@ -1,6 +1,15 @@
 open Printf
 open Scanf
 
+let read_lines () =
+  let rec aux lines =
+    try
+      let line = read_line () in
+      aux (line :: lines)
+    with End_of_file -> lines
+  in
+  String.concat "\n" (List.rev (aux []))
+
 let digit x =
   match x with
   | '0' .. '9' -> int_of_char x - int_of_char '0'
@@ -11,15 +20,6 @@ let id_counter = ref 0
 let make_id base =
   id_counter := !id_counter + 1 ;
   sprintf "%s.%d" base !id_counter
-
-let program =
-  let rec aux lines =
-    try
-      let line = read_line () in
-      aux (line :: lines)
-    with End_of_file -> lines
-  in
-  String.concat "\n" (List.rev (aux []))
 
 type token =
   | IntLiteral of int
@@ -69,64 +69,67 @@ let rec eprint_token_list = function
 
 exception EOF
 
-let rec tokenize i =
-  let next_char i =
-    if i < String.length program then (i + 1, program.[i]) else raise EOF
-  in
-  let rec next_int i acc =
-    try
-      let i, ch = next_char i in
-      match ch with
-      | '0' .. '9' -> next_int i ((acc * 10) + digit ch)
-      | _ -> (i - 1, acc)
-    with EOF -> (i, acc)
-  in
-  let next_ident i =
-    let buf = Buffer.create 5 in
-    let rec aux i =
+let tokenize program =
+  let rec aux i =
+    let next_char i =
+      if i < String.length program then (i + 1, program.[i]) else raise EOF
+    in
+    let rec next_int i acc =
       try
         let i, ch = next_char i in
         match ch with
-        | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' ->
-          Buffer.add_char buf ch ; aux i
-        | _ -> (i - 1, Buffer.contents buf)
-      with EOF -> (i, Buffer.contents buf)
+        | '0' .. '9' -> next_int i ((acc * 10) + digit ch)
+        | _ -> (i - 1, acc)
+      with EOF -> (i, acc)
     in
-    aux i
+    let next_ident i =
+      let buf = Buffer.create 5 in
+      let rec aux i =
+        try
+          let i, ch = next_char i in
+          match ch with
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' ->
+            Buffer.add_char buf ch ; aux i
+          | _ -> (i - 1, Buffer.contents buf)
+        with EOF -> (i, Buffer.contents buf)
+      in
+      aux i
+    in
+    try
+      let i, ch = next_char i in
+      match ch with
+      | ' ' | '\t' | '\n' | '\r' -> aux i
+      | '0' .. '9' ->
+        let i, num = next_int (i - 1) 0 in
+        IntLiteral num :: aux i
+      | 'a' .. 'z' | 'A' .. 'Z' ->
+        let i, str = next_ident (i - 1) in
+        ( match str with
+          | "let" -> Let
+          | "in" -> In
+          | "rec" -> Rec
+          | "true" -> IntLiteral 1 (* TODO: boolean type *)
+          | "false" -> IntLiteral 0
+          | "if" -> If
+          | "then" -> Then
+          | "else" -> Else
+          | _ -> Ident str )
+        :: aux i
+      | '+' -> Plus :: aux i
+      | '-' -> Minus :: aux i
+      | '*' -> Star :: aux i
+      | '/' -> Slash :: aux i
+      | '(' -> LParen :: aux i
+      | ')' -> RParen :: aux i
+      | '<' -> (
+          let i, ch = next_char i in
+          match ch with '>' -> LTGT :: aux i | _ -> LT :: aux (i - 1) )
+      | '>' -> GT :: aux i
+      | '=' -> Equal :: aux i
+      | _ -> failwith (sprintf "unexpected char: '%c'" ch)
+    with EOF -> []
   in
-  try
-    let i, ch = next_char i in
-    match ch with
-    | ' ' | '\t' | '\n' | '\r' -> tokenize i
-    | '0' .. '9' ->
-      let i, num = next_int (i - 1) 0 in
-      IntLiteral num :: tokenize i
-    | 'a' .. 'z' | 'A' .. 'Z' ->
-      let i, str = next_ident (i - 1) in
-      ( match str with
-        | "let" -> Let
-        | "in" -> In
-        | "rec" -> Rec
-        | "true" -> IntLiteral 1 (* TODO: boolean type *)
-        | "false" -> IntLiteral 0
-        | "if" -> If
-        | "then" -> Then
-        | "else" -> Else
-        | _ -> Ident str )
-      :: tokenize i
-    | '+' -> Plus :: tokenize i
-    | '-' -> Minus :: tokenize i
-    | '*' -> Star :: tokenize i
-    | '/' -> Slash :: tokenize i
-    | '(' -> LParen :: tokenize i
-    | ')' -> RParen :: tokenize i
-    | '<' -> (
-        let i, ch = next_char i in
-        match ch with '>' -> LTGT :: tokenize i | _ -> LT :: tokenize (i - 1) )
-    | '>' -> GT :: tokenize i
-    | '=' -> Equal :: tokenize i
-    | _ -> failwith (sprintf "unexpected char: '%c'" ch)
-  with EOF -> []
+  aux 0
 
 type ast =
   | IntValue of int
@@ -561,7 +564,8 @@ let rec generate letfuncs =
   main_code ^ letfuncs_code
 
 ;;
-let tokens = tokenize 0 in
+let program = read_lines () in
+let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let ast = parse tokens in
 let code = generate (analyze ast) in
