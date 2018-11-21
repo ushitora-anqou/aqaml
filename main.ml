@@ -149,13 +149,23 @@ type ast =
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (pattern * ast * ast)
-  | LetFunc of (bool * string * string list * ast * ast)
+  | LetFunc of (bool * string * pattern list * ast * ast)
 
 and pattern = ast * string list
 
 exception Unexpected_token
 
 let parse tokens =
+  let rec varnames_in_pattern = function
+    (* TODO: much faster algorithm? *)
+    | Var varname -> [varname]
+    | TupleValue values ->
+      List.fold_left
+        (fun a b -> List.rev_append a (varnames_in_pattern b))
+        [] values
+    | IntValue _ -> []
+    | _ -> failwith "unexpected ast"
+  in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
@@ -272,11 +282,11 @@ let parse tokens =
               match bind with Var name -> name | _ -> raise Unexpected_token
             in
             let rec aux = function
-              | Ident argname :: tokens ->
-                let tokens, args = aux tokens in
-                (tokens, argname :: args)
               | Equal :: tokens -> (tokens, [])
-              | _ -> raise Unexpected_token
+              | tokens ->
+                let tokens, arg = parse_pattern tokens in
+                let tokens, args = aux tokens in
+                (tokens, (arg, varnames_in_pattern arg) :: args)
             in
             let tokens, args = aux tokens in
             let tokens, func = parse_expression tokens in
@@ -287,19 +297,7 @@ let parse tokens =
             | _ -> raise Unexpected_token )
         | Equal :: tokens -> (
             (* define constants *)
-            let varnames =
-              let rec get_varnames = function
-                (* TODO: much faster algorithm? *)
-                | Var varname -> [varname]
-                | TupleValue values ->
-                  List.fold_left
-                    (fun a b -> List.rev_append a (get_varnames b))
-                    [] values
-                | IntValue _ -> []
-                | _ -> failwith "unexpected ast"
-              in
-              get_varnames bind
-            in
+            let varnames = varnames_in_pattern bind in
             let tokens, lhs = parse_expression tokens in
             match tokens with
             | In :: tokens ->
@@ -374,8 +372,12 @@ let analyze ast =
       let env' =
         { symbols=
             List.fold_left
-              (fun symbols arg -> HashMap.add arg (Var arg) symbols)
-              env.symbols args }
+              (fun symbols argname ->
+                 HashMap.add argname (Var argname) symbols )
+              env.symbols
+              (List.fold_left
+                 (fun a (_, argnames) -> List.rev_append a argnames)
+                 [] args) }
       in
       (* if recursive then funcname should be in env *)
       let env' =
@@ -394,7 +396,12 @@ let analyze ast =
   let symbols = HashMap.empty in
   let ast = aux {symbols} ast in
   let ast =
-    LetFunc (false, "aqaml_main", ["aqaml_main_dummy"], ast, IntValue 0)
+    LetFunc
+      ( false
+      , "aqaml_main"
+      , [(Var "aqaml_main_dummy", ["aqaml_main_dummy"])]
+      , ast
+      , IntValue 0 )
   in
   letfuncs := ast :: !letfuncs ;
   !letfuncs
@@ -402,6 +409,19 @@ let analyze ast =
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
 let rec generate letfuncs =
+  let reg_of_index = function
+    | 0 -> "rax"
+    | 1 -> "rbx"
+    | 2 -> "rdi"
+    | 3 -> "rsi"
+    | 4 -> "rdx"
+    | 5 -> "rcx"
+    | 6 -> "r8"
+    | 7 -> "r9"
+    | 8 -> "r12"
+    | 9 -> "r13"
+    | _ -> failwith "out-of-bound register"
+  in
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let stack_size = ref 0 in
@@ -615,7 +635,10 @@ let rec generate letfuncs =
                       HashMap.add argname offset env.varoffset
                     in
                     {offset; varoffset} )
-                 env args
+                 env
+                 (List.fold_left
+                    (fun a (_, argnames) -> List.rev_append a argnames)
+                    [] args)
              in
              (* if recursive then the function itself should be in env *)
              let env =
@@ -633,21 +656,17 @@ let rec generate letfuncs =
                ; "mov rbp, rsp"
                ; sprintf "sub rsp, %d" !stack_size
                ; String.concat "\n"
-                   (List.map
-                      (fun (i, reg) ->
-                         sprintf "mov [rbp - %d], %s" ((i + 1) * 8) reg )
-                      (List.filter
-                         (fun (index, reg) -> index < List.length args)
-                         [ (0, "rax")
-                         ; (1, "rbx")
-                         ; (2, "rdi")
-                         ; (3, "rsi")
-                         ; (4, "rdx")
-                         ; (5, "rcx")
-                         ; (6, "r8")
-                         ; (7, "r9")
-                         ; (8, "r12")
-                         ; (9, "r13") ]))
+                   (List.mapi
+                      (fun i arg ->
+                         match arg with
+                         | Var _, [argname] ->
+                           let offset =
+                             HashMap.find argname env.varoffset
+                           in
+                           sprintf "mov [rbp + %d], %s" offset
+                             (reg_of_index i)
+                         | _ -> failwith "unexpected pattern" )
+                      args)
                ; ( if recursive then
                      sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
                        funcname env.offset
