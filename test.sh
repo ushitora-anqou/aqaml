@@ -2,7 +2,7 @@
 
 function test_aqaml() {
     echo "$1" | ./aqaml > _test.s
-    gcc _test.s -o _test.o
+    gcc utility.o _test.s -o _test.o
     ./_test.o
     res=$?
     [ $res -eq $2 ] || echo "ERROR: $1 -> $res (expected $2)"
@@ -74,3 +74,8 @@ test_aqaml "let 1 = 1 in let ((10, b), c) = ((10, 40), 3) in b / 10 - c" 1
 test_aqaml "let f x y = x - y in let t = (f 10 2, f 5 4) in let a, b = t in a - b" 7
 test_aqaml "let f (x,y) = x - y in let t = (f (10,2), f (5,4)) in let a, b = t in a - b" 7
 test_aqaml "let f (x, y, z, w) (a, b, c) = (x / y - z + w) * (a - b / c) in f (10, 2, 3, 4) (20, 14, 7)" 108
+test_aqaml "if (1,2,3) = (1,2,3) then 1 else 0" 1
+test_aqaml "if (1,2,4) = (1,2,3) then 1 else 0" 0
+test_aqaml "if (1,2,3) <> (1,2,3) then 1 else 0" 0
+test_aqaml "if (1,2,4) <> (1,2,3) then 1 else 0" 1
+test_aqaml "let x = (1,2,3) in let y = (1,2,3) in if x = y then 1 else 0" 1

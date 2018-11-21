@@ -450,9 +450,9 @@ let rec generate letfuncs =
         [ String.concat "\n" (List.map (aux env) (List.rev values))
         ; sprintf "mov rax, %d" (tagged_int size)
         ; "call aqaml_malloc    /* malloc for tuple */"
-        (* size (54 bits) | color (2 bits) | tag byte (8 bits) *)
+        (* size in word (54 bits) | color (2 bits) | tag byte (8 bits) *)
         ; sprintf "mov QWORD PTR [rax], %d"
-            ((size lsl 10) lor (0 lsl 8) lor 1)
+            (((size / 2) lsl 10) lor (0 lsl 8) lor 1)
         ; String.concat "\n"
             (List.mapi
                (fun i _ ->
@@ -508,23 +508,17 @@ let rec generate letfuncs =
       String.concat "\n"
         [ aux env lhs
         ; aux env rhs
-        ; "pop rdi"
+        ; "pop rbx"
         ; "pop rax"
-        ; "cmp rax, rdi"
-        ; "sete al"
-        ; "movzx rax, al"
-        ; tag_int "rax"
+        ; "call aqaml_structural_equal"
         ; "push rax" ]
     | StructInequal (lhs, rhs) ->
       String.concat "\n"
         [ aux env lhs
         ; aux env rhs
-        ; "pop rdi"
+        ; "pop rbx"
         ; "pop rax"
-        ; "cmp rax, rdi"
-        ; "setne al"
-        ; "movzx rax, al"
-        ; tag_int "rax"
+        ; "call aqaml_structural_inequal"
         ; "push rax" ]
     | LessThan (lhs, rhs) ->
       String.concat "\n"
@@ -678,8 +672,25 @@ let rec generate letfuncs =
       [ "aqaml_malloc:"
       ; untag_int "rax"
       ; "mov edi, eax"
-      ; "call malloc@PLT"
+      ; "call aqaml_malloc_detail@PLT"
       ; "ret"
+      ; ""
+      ; "aqaml_structural_equal:"
+      ; "mov rdi, rax"
+      ; "mov rsi, rbx"
+      ; "call aqaml_structural_equal_detail@PLT"
+      ; tag_int "rax"
+      ; "ret"
+      ; ""
+      ; "aqaml_structural_inequal:"
+      ; "mov rdi, rax"
+      ; "mov rsi, rbx"
+      ; "call aqaml_structural_equal_detail@PLT"
+      ; "test eax, eax" (* eax == 0 *)
+      ; "sete al"
+      ; tag_int "rax"
+      ; "ret"
+      ; ""
       ; "main:"
       ; "call aqaml_main"
       ; "sar rax, 1"
