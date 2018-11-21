@@ -148,8 +148,10 @@ type ast =
   | IfThenElse of (ast * ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
-  | LetVar of (ast * string list * ast * ast)
+  | LetVar of (pattern * ast * ast)
   | LetFunc of (bool * string * string list * ast * ast)
+
+and pattern = ast * string list
 
 exception Unexpected_token
 
@@ -302,7 +304,7 @@ let parse tokens =
             match tokens with
             | In :: tokens ->
               let tokens, rhs = parse_expression tokens in
-              (tokens, LetVar (bind, varnames, lhs, rhs))
+              (tokens, LetVar ((bind, varnames), lhs, rhs))
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
     | tokens -> parse_if tokens
@@ -358,14 +360,14 @@ let analyze ast =
         try HashMap.find name env.symbols with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
-    | LetVar (bind, varnames, lhs, rhs) ->
+    | LetVar ((bind, varnames), lhs, rhs) ->
       let rec add_symbols symbols = function
         | varname :: varnames ->
           add_symbols (HashMap.add varname (Var varname) symbols) varnames
         | [] -> symbols
       in
       let env' = {symbols= add_symbols env.symbols varnames} in
-      LetVar (bind, varnames, aux env lhs, aux env' rhs)
+      LetVar ((bind, varnames), aux env lhs, aux env' rhs)
     | LetFunc (recursive, funcname, args, func, body) ->
       let gen_funcname = make_id funcname in
       let funcvar = Var gen_funcname in
@@ -551,7 +553,7 @@ let rec generate letfuncs =
         ; "pop r10"
         ; "call r10"
         ; "push rax" ]
-    | LetVar (bind, varnames, lhs, rhs) ->
+    | LetVar ((bind, varnames), lhs, rhs) ->
       let offset = env.offset - (List.length varnames * 8) in
       stack_size := max !stack_size (-offset) ;
       let env' =
