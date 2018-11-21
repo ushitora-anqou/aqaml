@@ -41,6 +41,8 @@ type token =
   | GT
   | LTGT
   | Comma
+  | LBracket
+  | RBracket
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -62,6 +64,8 @@ let string_of_token = function
   | GT -> ">"
   | LTGT -> "<>"
   | Comma -> ","
+  | LBracket -> "["
+  | RBracket -> "]"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -129,6 +133,8 @@ let tokenize program =
       | '>' -> GT :: aux i
       | '=' -> Equal :: aux i
       | ',' -> Comma :: aux i
+      | '[' -> LBracket :: aux i
+      | ']' -> RBracket :: aux i
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -169,6 +175,7 @@ let parse tokens =
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
+    | LBracket :: RBracket :: tokens -> (tokens, IntValue 0)
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
