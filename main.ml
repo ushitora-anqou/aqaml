@@ -148,8 +148,7 @@ type ast =
   | IfThenElse of (ast * ast * ast)
   | Var of string
   | FuncCall of (ast * ast list)
-  | LetVar of (string * ast * ast)
-  | LetVarTuple of (string list * ast * ast)
+  | LetVar of (ast * string list * ast * ast)
   | LetFunc of (bool * string * string list * ast * ast)
 
 exception Unexpected_token
@@ -264,49 +263,45 @@ let parse tokens =
           | _ -> (tokens, false)
         in
         let tokens, bind = parse_pattern tokens in
-        match bind with
-        | Var name -> (
-            match tokens with
-            | Equal :: tokens -> (
-                (* define constant *)
-                let tokens, lhs = parse_expression tokens in
-                match tokens with
-                | In :: tokens ->
-                  let tokens, rhs = parse_expression tokens in
-                  (tokens, LetVar (name, lhs, rhs))
-                | _ -> raise Unexpected_token )
-            | _ -> (
-                (* define function *)
-                let rec aux = function
-                  | Ident argname :: tokens ->
-                    let tokens, args = aux tokens in
-                    (tokens, argname :: args)
-                  | Equal :: tokens -> (tokens, [])
-                  | _ -> raise Unexpected_token
-                in
-                let tokens, args = aux tokens in
-                let tokens, func = parse_expression tokens in
-                match tokens with
-                | In :: tokens ->
-                  let tokens, body = parse_expression tokens in
-                  (tokens, LetFunc (recursive, name, args, func, body))
-                | _ -> raise Unexpected_token ) )
-        | TupleValue asts -> (
-            let varnames =
-              List.map
-                (function
-                  | Var varname -> varname | _ -> raise Unexpected_token)
-                asts
+        match tokens with
+        | Ident _ :: _ -> (
+            (* define function *)
+            let name =
+              match bind with Var name -> name | _ -> raise Unexpected_token
             in
+            let rec aux = function
+              | Ident argname :: tokens ->
+                let tokens, args = aux tokens in
+                (tokens, argname :: args)
+              | Equal :: tokens -> (tokens, [])
+              | _ -> raise Unexpected_token
+            in
+            let tokens, args = aux tokens in
+            let tokens, func = parse_expression tokens in
             match tokens with
-            | Equal :: tokens -> (
-                (* define constant (tuple) *)
-                let tokens, lhs = parse_expression tokens in
-                match tokens with
-                | In :: tokens ->
-                  let tokens, rhs = parse_expression tokens in
-                  (tokens, LetVarTuple (varnames, lhs, rhs))
-                | _ -> raise Unexpected_token )
+            | In :: tokens ->
+              let tokens, body = parse_expression tokens in
+              (tokens, LetFunc (recursive, name, args, func, body))
+            | _ -> raise Unexpected_token )
+        | Equal :: tokens -> (
+            (* define constants *)
+            let varnames =
+              let rec get_varnames = function
+                (* TODO: much faster algorithm? *)
+                | Var varname -> [varname]
+                | TupleValue values ->
+                  List.fold_left
+                    (fun a b -> List.rev_append a (get_varnames b))
+                    [] values
+                | _ -> failwith "unexpected ast"
+              in
+              get_varnames bind
+            in
+            let tokens, lhs = parse_expression tokens in
+            match tokens with
+            | In :: tokens ->
+              let tokens, rhs = parse_expression tokens in
+              (tokens, LetVar (bind, varnames, lhs, rhs))
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
     | tokens -> parse_if tokens
@@ -362,19 +357,15 @@ let analyze ast =
         try HashMap.find name env.symbols with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
-    | LetVar (varname, lhs, rhs) ->
-      let env' = {symbols= HashMap.add varname (Var varname) env.symbols} in
-      LetVar (varname, aux env lhs, aux env' rhs)
-    | LetVarTuple (varnames, lhs, rhs) ->
+    | LetVar (bind, varnames, lhs, rhs) ->
       let rec add_symbols symbols = function
         | varname :: varnames ->
           add_symbols (HashMap.add varname (Var varname) symbols) varnames
         | [] -> symbols
       in
       let env' = {symbols= add_symbols env.symbols varnames} in
-      LetVarTuple (varnames, aux env lhs, aux env' rhs)
+      LetVar (bind, varnames, aux env lhs, aux env' rhs)
     | LetFunc (recursive, funcname, args, func, body) ->
-      (* TODO: allow recursion *)
       let gen_funcname = make_id funcname in
       let funcvar = Var gen_funcname in
       let env' =
@@ -421,7 +412,7 @@ let rec generate letfuncs =
         ; sprintf "mov rax, %d" size
         ; "call aqaml_malloc    /* malloc for tuple */"
         (* size (54 bits) | color (2 bits) | tag byte (8 bits) *)
-        ; sprintf "mov DWORD PTR [rax], %d"
+        ; sprintf "mov QWORD PTR [rax], %d"
             ((size lsl 10) lor (0 lsl 8) lor 1)
         ; String.concat "\n"
             (List.mapi
@@ -559,20 +550,7 @@ let rec generate letfuncs =
         ; "pop r10"
         ; "call r10"
         ; "push rax" ]
-    | LetVar (varname, lhs, rhs) ->
-      let lhs_code = aux env lhs in
-      let offset = env.offset - 8 in
-      stack_size := max !stack_size (-offset) ;
-      let env =
-        {offset; varoffset= HashMap.add varname offset env.varoffset}
-      in
-      String.concat "\n"
-        [ lhs_code
-        ; "pop rax"
-        ; sprintf "mov [rbp + %d], rax" offset
-        ; aux env rhs ]
-    | LetVarTuple (varnames, lhs, rhs) ->
-      let lhs_code = aux env lhs in
+    | LetVar (bind, varnames, lhs, rhs) ->
       let offset = env.offset - (List.length varnames * 8) in
       stack_size := max !stack_size (-offset) ;
       let env' =
@@ -587,17 +565,26 @@ let rec generate letfuncs =
              in
              aux 1 env.varoffset varnames) }
       in
-      String.concat "\n"
-        [ lhs_code
-        ; "pop rax"
-        ; String.concat "\n"
-            (List.mapi
-               (fun i _ ->
-                  sprintf "mov rdi, [rax + %d]\nmov [rbp + %d], rdi"
-                    ((i + 1) * 8)
-                    (env.offset - ((i + 1) * 8)) )
-               varnames)
-        ; aux env' rhs ]
+      let assign_code =
+        let rec aux = function
+          | Var varname ->
+            let offset = HashMap.find varname env'.varoffset in
+            String.concat "\n"
+              ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
+          | TupleValue values ->
+            String.concat "\n"
+              [ "pop rax"
+              ; String.concat "\n"
+                  (List.mapi
+                     (fun i _ ->
+                        sprintf "push QWORD PTR [rax + %d]" ((i + 1) * 8) )
+                     values)
+              ; String.concat "\n" (List.map aux (List.rev values)) ]
+          | _ -> failwith "unexpected ast"
+        in
+        aux bind
+      in
+      String.concat "\n" [aux env lhs; assign_code; aux env' rhs]
     | LetFunc (_, funcname, _, _, body) ->
       let offset = env.offset - 8 in
       stack_size := max !stack_size (-offset) ;

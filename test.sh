@@ -69,3 +69,4 @@ test_aqaml "if 1 >= 1 then 1 else 0" 1
 test_aqaml "let not x = if x then false else true in if not true then 1 else 0" 0
 test_aqaml "let (a, b, c) = (10, 20, 30) in a + b - c" 0
 test_aqaml "let x = (4, 2, 3) in let (a, b, c) = x in a * b - c" 5
+test_aqaml "let ((a, b), c) = ((10, 40), 3) in b / a - c" 1
