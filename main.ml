@@ -293,6 +293,7 @@ let parse tokens =
                   List.fold_left
                     (fun a b -> List.rev_append a (get_varnames b))
                     [] values
+                | IntValue _ -> []
                 | _ -> failwith "unexpected ast"
               in
               get_varnames bind
@@ -580,6 +581,7 @@ let rec generate letfuncs =
                         sprintf "push QWORD PTR [rax + %d]" ((i + 1) * 8) )
                      values)
               ; String.concat "\n" (List.map aux (List.rev values)) ]
+          | IntValue _ -> "pop rax"
           | _ -> failwith "unexpected ast"
         in
         aux bind
