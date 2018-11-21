@@ -72,3 +72,5 @@ test_aqaml "let x = (4, 2, 3) in let (a, b, c) = x in a * b - c" 5
 test_aqaml "let ((a, b), c) = ((10, 40), 3) in b / a - c" 1
 test_aqaml "let 1 = 1 in let ((10, b), c) = ((10, 40), 3) in b / 10 - c" 1
 test_aqaml "let f x y = x - y in let t = (f 10 2, f 5 4) in let a, b = t in a - b" 7
+test_aqaml "let f (x,y) = x - y in let t = (f (10,2), f (5,4)) in let a, b = t in a - b" 7
+test_aqaml "let f (x, y, z, w) (a, b, c) = (x / y - z + w) * (a - b / c) in f (10, 2, 3, 4) (20, 14, 7)" 108

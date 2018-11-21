@@ -276,7 +276,16 @@ let parse tokens =
         in
         let tokens, bind = parse_pattern tokens in
         match tokens with
-        | Ident _ :: _ -> (
+        | Equal :: tokens -> (
+            (* define constants *)
+            let varnames = varnames_in_pattern bind in
+            let tokens, lhs = parse_expression tokens in
+            match tokens with
+            | In :: tokens ->
+              let tokens, rhs = parse_expression tokens in
+              (tokens, LetVar ((bind, varnames), lhs, rhs))
+            | _ -> raise Unexpected_token )
+        | _ -> (
             (* define function *)
             let name =
               match bind with Var name -> name | _ -> raise Unexpected_token
@@ -294,17 +303,7 @@ let parse tokens =
             | In :: tokens ->
               let tokens, body = parse_expression tokens in
               (tokens, LetFunc (recursive, name, args, func, body))
-            | _ -> raise Unexpected_token )
-        | Equal :: tokens -> (
-            (* define constants *)
-            let varnames = varnames_in_pattern bind in
-            let tokens, lhs = parse_expression tokens in
-            match tokens with
-            | In :: tokens ->
-              let tokens, rhs = parse_expression tokens in
-              (tokens, LetVar ((bind, varnames), lhs, rhs))
-            | _ -> raise Unexpected_token )
-        | _ -> raise Unexpected_token )
+            | _ -> raise Unexpected_token ) )
     | tokens -> parse_if tokens
   and parse_expression tokens = parse_let tokens
   and parse_pattern_primary = function
@@ -424,6 +423,23 @@ let rec generate letfuncs =
   in
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
+  let tagged_int num = (num lsl 1) lor 1 in
+  let rec gen_assign_pattern env = function
+    | Var varname ->
+      let offset = HashMap.find varname env.varoffset in
+      String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
+    | TupleValue values ->
+      String.concat "\n"
+        [ "pop rax"
+        ; String.concat "\n"
+            (List.mapi
+               (fun i _ -> sprintf "push QWORD PTR [rax + %d]" ((i + 1) * 8))
+               values)
+        ; String.concat "\n"
+            (List.map (gen_assign_pattern env) (List.rev values)) ]
+    | IntValue _ -> "pop rax"
+    | _ -> failwith "unexpected ast"
+  in
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
@@ -432,7 +448,7 @@ let rec generate letfuncs =
       let size = (List.length values + 1) * 8 in
       String.concat "\n"
         [ String.concat "\n" (List.map (aux env) (List.rev values))
-        ; sprintf "mov rax, %d" size
+        ; sprintf "mov rax, %d" (tagged_int size)
         ; "call aqaml_malloc    /* malloc for tuple */"
         (* size (54 bits) | color (2 bits) | tag byte (8 bits) *)
         ; sprintf "mov QWORD PTR [rax], %d"
@@ -588,26 +604,7 @@ let rec generate letfuncs =
              in
              aux 1 env.varoffset varnames) }
       in
-      let assign_code =
-        let rec aux = function
-          | Var varname ->
-            let offset = HashMap.find varname env'.varoffset in
-            String.concat "\n"
-              ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
-          | TupleValue values ->
-            String.concat "\n"
-              [ "pop rax"
-              ; String.concat "\n"
-                  (List.mapi
-                     (fun i _ ->
-                        sprintf "push QWORD PTR [rax + %d]" ((i + 1) * 8) )
-                     values)
-              ; String.concat "\n" (List.map aux (List.rev values)) ]
-          | IntValue _ -> "pop rax"
-          | _ -> failwith "unexpected ast"
-        in
-        aux bind
-      in
+      let assign_code = gen_assign_pattern env' bind in
       String.concat "\n" [aux env lhs; assign_code; aux env' rhs]
     | LetFunc (_, funcname, _, _, body) ->
       let offset = env.offset - 8 in
@@ -656,16 +653,13 @@ let rec generate letfuncs =
                ; "mov rbp, rsp"
                ; sprintf "sub rsp, %d" !stack_size
                ; String.concat "\n"
-                   (List.mapi
-                      (fun i arg ->
-                         match arg with
-                         | Var _, [argname] ->
-                           let offset =
-                             HashMap.find argname env.varoffset
-                           in
-                           sprintf "mov [rbp + %d], %s" offset
-                             (reg_of_index i)
-                         | _ -> failwith "unexpected pattern" )
+                   (List.rev
+                      (List.mapi
+                         (fun i _ -> sprintf "push %s" (reg_of_index i))
+                         args))
+               ; String.concat "\n"
+                   (List.map
+                      (fun (ptn, _) -> gen_assign_pattern env ptn)
                       args)
                ; ( if recursive then
                      sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
