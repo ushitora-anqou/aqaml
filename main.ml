@@ -442,7 +442,7 @@ let rec generate letfuncs =
   in
   let stack_size = ref 0 in
   let rec aux env = function
-    | IntValue num -> sprintf "mov rax, %d\n%s\npush rax" num (tag_int "rax")
+    | IntValue num -> sprintf "push %d" (tagged_int num)
     | TupleValue values ->
       (* +1 for header *)
       let size = (List.length values + 1) * 8 in
