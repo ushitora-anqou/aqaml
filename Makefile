@@ -5,6 +5,6 @@ test: aqaml test.sh utility.o
 	./test.sh
 
 utility.o: utility.c
-	gcc -c -o $@ $^
+	gcc -Wall -c -o $@ $^
 
 .PHONY: test

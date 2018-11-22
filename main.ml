@@ -431,6 +431,14 @@ let rec generate letfuncs =
   let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let tagged_int num = (num lsl 1) lor 1 in
+  let rec gen_alloc_block size color tag =
+    (* allocated block address is in rax *)
+    String.concat "\n"
+      [ sprintf "mov rdi, %d" size
+      ; sprintf "mov rsi, %d" color
+      ; sprintf "mov rdx, %d" tag
+      ; "call aqaml_alloc_block@PLT" ]
+  in
   let rec gen_assign_pattern env = function
     | Var varname ->
       let offset = HashMap.find varname env.varoffset in
@@ -455,11 +463,7 @@ let rec generate letfuncs =
       let size = (List.length values + 1) * 8 in
       String.concat "\n"
         [ String.concat "\n" (List.map (aux env) (List.rev values))
-        ; sprintf "mov rax, %d" (tagged_int size)
-        ; "call aqaml_malloc    /* malloc for tuple */"
-        (* size in word (54 bits) | color (2 bits) | tag byte (8 bits) *)
-        ; sprintf "mov QWORD PTR [rax], %d"
-            (((size / 2) lsl 10) lor (0 lsl 8) lor 1)
+        ; gen_alloc_block size 0 1
         ; String.concat "\n"
             (List.mapi
                (fun i _ ->
