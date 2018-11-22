@@ -43,6 +43,7 @@ type token =
   | Comma
   | LBracket
   | RBracket
+  | ColonColon
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -66,6 +67,7 @@ let string_of_token = function
   | Comma -> ","
   | LBracket -> "["
   | RBracket -> "]"
+  | ColonColon -> "::"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -135,6 +137,11 @@ let tokenize program =
       | ',' -> Comma :: aux i
       | '[' -> LBracket :: aux i
       | ']' -> RBracket :: aux i
+      | ':' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ':' -> ColonColon :: aux i
+          | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -156,6 +163,7 @@ type ast =
   | FuncCall of (ast * ast list)
   | LetVar of (pattern * ast * ast)
   | LetFunc of (bool * string * pattern list * ast * ast)
+  | Cons of (ast * ast)
 
 and pattern = ast * string list
 
@@ -164,12 +172,14 @@ exception Unexpected_token
 let parse tokens =
   let rec varnames_in_pattern = function
     (* TODO: much faster algorithm? *)
+    | IntValue _ -> []
     | Var varname -> [varname]
+    | Cons (car, cdr) ->
+      List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
     | TupleValue values ->
       List.fold_left
         (fun a b -> List.rev_append a (varnames_in_pattern b))
         [] values
-    | IntValue _ -> []
     | _ -> failwith "unexpected ast"
   in
   let rec parse_primary = function
@@ -322,15 +332,22 @@ let parse tokens =
         | RParen :: tokens -> (tokens, ast)
         | _ -> raise Unexpected_token )
     | _ -> raise Unexpected_token
+  and parse_pattern_cons tokens =
+    let tokens, car = parse_pattern_primary tokens in
+    match tokens with
+    | ColonColon :: tokens ->
+      let tokens, cdr = parse_pattern tokens in
+      (tokens, Cons (car, cdr))
+    | _ -> (tokens, car)
   and parse_pattern_tuple tokens =
     let rec aux lhs tokens =
       match tokens with
       | Comma :: tokens ->
-        let tokens, rhs = parse_pattern_primary tokens in
+        let tokens, rhs = parse_pattern_cons tokens in
         aux (rhs :: lhs) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_pattern_primary tokens in
+    let tokens, ast = parse_pattern_cons tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
     | [] -> raise Unexpected_token
@@ -350,6 +367,7 @@ let analyze ast =
     match ast with
     | IntValue _ -> ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
+    | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
@@ -440,9 +458,17 @@ let rec generate letfuncs =
       ; "call aqaml_alloc_block@PLT" ]
   in
   let rec gen_assign_pattern env = function
+    | IntValue _ -> "pop rax"
     | Var varname ->
       let offset = HashMap.find varname env.varoffset in
       String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
+    | Cons (car, cdr) ->
+      String.concat "\n"
+        [ "pop rax"
+        ; "push QWORD PTR [rax + 8]"
+        ; "push QWORD PTR [rax + 16]"
+        ; gen_assign_pattern env cdr
+        ; gen_assign_pattern env car ]
     | TupleValue values ->
       String.concat "\n"
         [ "pop rax"
@@ -452,12 +478,21 @@ let rec generate letfuncs =
                values)
         ; String.concat "\n"
             (List.map (gen_assign_pattern env) (List.rev values)) ]
-    | IntValue _ -> "pop rax"
     | _ -> failwith "unexpected ast"
   in
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
+    | Cons (car, cdr) ->
+      String.concat "\n"
+        [ aux env cdr
+        ; aux env car
+        ; gen_alloc_block 24 0 0
+        ; "pop rdi" (* car *)
+        ; "mov [rax + 8], rdi"
+        ; "pop rdi" (* cdr *)
+        ; "mov [rax + 16], rdi"
+        ; "push rax" ]
     | TupleValue values ->
       (* +1 for header *)
       let size = (List.length values + 1) * 8 in
@@ -714,6 +749,12 @@ let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let ast = parse tokens in
+let ast =
+  LetVar
+    ( (Var "aqaml_cons_var", ["aqaml_cons_var"])
+    , Cons (IntValue 10, IntValue 0)
+    , ast )
+in
 let code = generate (analyze ast) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])

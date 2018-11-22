@@ -80,3 +80,4 @@ test_aqaml "if (1,2,3) <> (1,2,3) then 1 else 0" 0
 test_aqaml "if (1,2,4) <> (1,2,3) then 1 else 0" 1
 test_aqaml "let x = (1,2,3) in let y = (1,2,3) in if x = y then 1 else 0" 1
 test_aqaml "if [] = [] then 1 else 0" 1
+test_aqaml "let x::xs = aqaml_cons_var in x" 10
