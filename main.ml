@@ -232,30 +232,37 @@ let parse tokens =
     in
     let tokens, ast = parse_multiplicative tokens in
     aux ast tokens
+  and parse_cons tokens =
+    let tokens, car = parse_additive tokens in
+    match tokens with
+    | ColonColon :: tokens ->
+      let tokens, cdr = parse_cons tokens in
+      (tokens, Cons (car, cdr))
+    | _ -> (tokens, car)
   and parse_structural_equal tokens =
     let rec aux lhs tokens =
       match tokens with
       | Equal :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (StructEqual (lhs, rhs)) tokens
       | LTGT :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (StructInequal (lhs, rhs)) tokens
       | LT :: Equal :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (LessThanEqual (lhs, rhs)) tokens
       | GT :: Equal :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (LessThanEqual (rhs, lhs)) tokens
       | LT :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (LessThan (lhs, rhs)) tokens
       | GT :: tokens ->
-        let tokens, rhs = parse_additive tokens in
+        let tokens, rhs = parse_cons tokens in
         aux (LessThan (rhs, lhs)) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_additive tokens in
+    let tokens, ast = parse_cons tokens in
     aux ast tokens
   and parse_tuple tokens =
     let rec aux lhs tokens =
@@ -336,7 +343,7 @@ let parse tokens =
     let tokens, car = parse_pattern_primary tokens in
     match tokens with
     | ColonColon :: tokens ->
-      let tokens, cdr = parse_pattern tokens in
+      let tokens, cdr = parse_pattern_cons tokens in
       (tokens, Cons (car, cdr))
     | _ -> (tokens, car)
   and parse_pattern_tuple tokens =
@@ -485,26 +492,30 @@ let rec generate letfuncs =
     | IntValue num -> sprintf "push %d" (tagged_int num)
     | Cons (car, cdr) ->
       String.concat "\n"
-        [ aux env cdr
+        [ "/* Cons BEGIN */"
+        ; aux env cdr
         ; aux env car
         ; gen_alloc_block 24 0 0
         ; "pop rdi" (* car *)
         ; "mov [rax + 8], rdi"
         ; "pop rdi" (* cdr *)
         ; "mov [rax + 16], rdi"
-        ; "push rax" ]
+        ; "push rax"
+        ; "/* Cons END */" ]
     | TupleValue values ->
       (* +1 for header *)
       let size = (List.length values + 1) * 8 in
       String.concat "\n"
-        [ String.concat "\n" (List.map (aux env) (List.rev values))
+        [ "/* TupleValue BEGIN */"
+        ; String.concat "\n" (List.map (aux env) (List.rev values))
         ; gen_alloc_block size 0 1
         ; String.concat "\n"
             (List.mapi
                (fun i _ ->
                   sprintf "pop rdi\nmov [rax + %d], rdi" ((i + 1) * 8) )
                values)
-        ; "push rax" ]
+        ; "push rax"
+        ; "/* TupleValue END */" ]
     | Add (lhs, rhs) ->
       String.concat "\n"
         [ aux env lhs
@@ -688,7 +699,10 @@ let rec generate letfuncs =
              stack_size := -env.offset ;
              let code = aux env func in
              String.concat "\n"
-               [ funcname ^ ":"
+               [ sprintf "/* %s(%d) */"
+                   (if recursive then "recursive" else "")
+                   (List.length args)
+               ; funcname ^ ":"
                ; "push rbp"
                ; "mov rbp, rsp"
                ; sprintf "sub rsp, %d" !stack_size
@@ -749,12 +763,6 @@ let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let ast = parse tokens in
-let ast =
-  LetVar
-    ( (Var "aqaml_cons_var", ["aqaml_cons_var"])
-    , Cons (IntValue 10, IntValue 0)
-    , ast )
-in
 let code = generate (analyze ast) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
