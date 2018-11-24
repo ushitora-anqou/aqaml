@@ -43,6 +43,7 @@ type token =
   | Comma
   | LBracket
   | RBracket
+  | LRBracket
   | ColonColon
 
 let string_of_token = function
@@ -67,6 +68,7 @@ let string_of_token = function
   | Comma -> ","
   | LBracket -> "["
   | RBracket -> "]"
+  | LRBracket -> "[]"
   | ColonColon -> "::"
 
 let rec eprint_token_list = function
@@ -135,7 +137,11 @@ let tokenize program =
       | '>' -> GT :: aux i
       | '=' -> Equal :: aux i
       | ',' -> Comma :: aux i
-      | '[' -> LBracket :: aux i
+      | '[' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ']' -> LRBracket :: aux i
+          | _ -> LBracket :: aux (i - 1) )
       | ']' -> RBracket :: aux i
       | ':' -> (
           let i, ch = next_char i in
@@ -185,7 +191,7 @@ let parse tokens =
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
-    | LBracket :: RBracket :: tokens -> (tokens, IntValue 0)
+    | LRBracket :: tokens -> (tokens, IntValue 0)
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
