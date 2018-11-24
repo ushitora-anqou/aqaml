@@ -90,3 +90,7 @@ let sub x y = x - y in
 let div x y = x / y in
 f ([add 10 2; sub 5 1], div 6 4) 10" 18
 test_aqaml "let f ([a;b;c], [d;e;f], [g;h;i]) = f in f ([1;2;3], [4;5;6], [7;8;9])" 6
+test_aqaml "if [1;2;3] = [1;2;3] then 1 else 0" 1
+test_aqaml "if [1;2;4] = [1;2;3] then 1 else 0" 0
+test_aqaml "if [1;2;3] <> [1;2;3] then 1 else 0" 0
+test_aqaml "if [1;2;4] <> [1;2;3] then 1 else 0" 1
