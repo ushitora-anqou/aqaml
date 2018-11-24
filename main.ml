@@ -173,6 +173,7 @@ type ast =
   | LetVar of (pattern * ast * ast)
   | LetFunc of (bool * string * pattern list * ast * ast)
   | Cons of (ast * ast)
+  | EmptyList
 
 and pattern = ast * string list
 
@@ -194,7 +195,7 @@ let parse tokens =
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
-    | LRBracket :: tokens -> (tokens, IntValue 0)
+    | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
@@ -206,7 +207,7 @@ let parse tokens =
           let tokens, car = parse_expression tokens in
           let tokens, cdr = aux tokens in
           (tokens, Cons (car, cdr))
-        | RBracket :: tokens -> (tokens, IntValue 0) (* [] = IntValue 0 *)
+        | RBracket :: tokens -> (tokens, EmptyList)
         | _ -> raise Unexpected_token
       in
       let tokens, car = parse_expression tokens in
@@ -395,6 +396,7 @@ let analyze ast =
     match ast with
     | IntValue _ -> ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
+    | EmptyList -> IntValue 0
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -688,7 +690,7 @@ let rec generate letfuncs =
         [ sprintf "lea rax, [rip + %s]" funcname
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env body ]
-        (* | _ -> failwith "unexpected ast" *)
+    | _ -> failwith "unexpected ast"
   in
   let letfuncs_code =
     String.concat "\n"
