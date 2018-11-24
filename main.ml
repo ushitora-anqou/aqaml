@@ -107,6 +107,22 @@ let tokenize program =
       in
       aux i
     in
+    let skip_comment i =
+      let rec aux i depth =
+        let i, ch = next_char i in
+        match ch with
+        | '(' -> (
+            let i, ch = next_char i in
+            match ch with '*' -> aux i (depth + 1) | _ -> aux (i - 1) depth )
+        | '*' -> (
+            let i, ch = next_char i in
+            match ch with
+            | ')' -> if depth == 1 then i else aux i (depth - 1)
+            | _ -> aux (i - 1) depth )
+        | _ -> aux i depth
+      in
+      aux i 1
+    in
     try
       let i, ch = next_char i in
       match ch with
@@ -131,7 +147,13 @@ let tokenize program =
       | '-' -> Minus :: aux i
       | '*' -> Star :: aux i
       | '/' -> Slash :: aux i
-      | '(' -> LParen :: aux i
+      | '(' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '*' ->
+            let i = skip_comment i in
+            aux i
+          | _ -> LParen :: aux (i - 1) )
       | ')' -> RParen :: aux i
       | '<' -> (
           let i, ch = next_char i in
