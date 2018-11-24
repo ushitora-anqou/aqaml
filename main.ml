@@ -182,7 +182,7 @@ exception Unexpected_token
 let parse tokens =
   let rec varnames_in_pattern = function
     (* TODO: much faster algorithm? *)
-    | IntValue _ -> []
+    | IntValue _ | EmptyList -> []
     | Var varname -> [varname]
     | Cons (car, cdr) ->
       List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
@@ -360,6 +360,18 @@ let parse tokens =
         match tokens with
         | RParen :: tokens -> (tokens, ast)
         | _ -> raise Unexpected_token )
+    | LBracket :: tokens ->
+      let rec aux = function
+        | Semicolon :: tokens ->
+          let tokens, car = parse_pattern tokens in
+          let tokens, cdr = aux tokens in
+          (tokens, Cons (car, cdr))
+        | RBracket :: tokens -> (tokens, EmptyList)
+        | _ -> raise Unexpected_token
+      in
+      let tokens, car = parse_pattern tokens in
+      let tokens, cdr = aux tokens in
+      (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
   and parse_pattern_cons tokens =
     let tokens, car = parse_pattern_primary tokens in
@@ -396,7 +408,7 @@ let analyze ast =
     match ast with
     | IntValue _ -> ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
-    | EmptyList -> IntValue 0
+    | EmptyList -> ast
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -488,7 +500,7 @@ let rec generate letfuncs =
       ; "call aqaml_alloc_block@PLT" ]
   in
   let rec gen_assign_pattern env = function
-    | IntValue _ -> "pop rax"
+    | IntValue _ | EmptyList -> "pop rax"
     | Var varname ->
       let offset = HashMap.find varname env.varoffset in
       String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -513,6 +525,7 @@ let rec generate letfuncs =
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
+    | EmptyList -> aux env (IntValue 0)
     | Cons (car, cdr) ->
       String.concat "\n"
         [ "/* Cons BEGIN */"
@@ -690,7 +703,6 @@ let rec generate letfuncs =
         [ sprintf "lea rax, [rip + %s]" funcname
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env body ]
-    | _ -> failwith "unexpected ast"
   in
   let letfuncs_code =
     String.concat "\n"
