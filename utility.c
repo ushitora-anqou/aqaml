@@ -20,7 +20,7 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs, unsigned long rhs)
     // pointer
     AQamlBlock *lhs_blk = (AQamlBlock *)lhs, *rhs_blk = (AQamlBlock *)rhs;
     if (lhs_blk->header != rhs_blk->header) return 1;
-    unsigned long size = (lhs_blk->header >> 12) - 1;
+    unsigned long size = (lhs_blk->header >> 10) - 1;
 
     for (int i = 0; i < size; i++) {
         unsigned long lhs = lhs_blk->data[i], rhs = rhs_blk->data[i];
@@ -30,11 +30,11 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs, unsigned long rhs)
     return 1;
 }
 
-void *aqaml_alloc_block(unsigned long size_in_bytes, unsigned long color,
+void *aqaml_alloc_block(unsigned long size, unsigned long color,
                         unsigned long tag)
 {
-    unsigned long *ptr = aqaml_malloc_detail(size_in_bytes);
+    unsigned long *ptr = aqaml_malloc_detail(size * 8);
     // size in word (54 bits) | color (2 bits) | tag byte (8 bits)
-    *ptr = ((size_in_bytes / 2) << 10) | (color << 8) | tag;
+    *ptr = (size << 10) | (color << 8) | tag;
     return ptr;
 }
