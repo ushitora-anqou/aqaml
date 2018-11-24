@@ -80,6 +80,6 @@ test_aqaml "if (1,2,3) <> (1,2,3) then 1 else 0" 0
 test_aqaml "if (1,2,4) <> (1,2,3) then 1 else 0" 1
 test_aqaml "let x = (1,2,3) in let y = (1,2,3) in if x = y then 1 else 0" 1
 test_aqaml "if [] = [] then 1 else 0" 1
-test_aqaml "let x::xs = 1::2::3::[] in if x = 1 then 1 else 0" 1
-test_aqaml "let x::xs = 1::2::3::[] in let y::ys = xs in let z::zs = ys in if z = 3 then 1 else 0" 1
-test_aqaml "let f (x::xs, y) z = x - y * z in f (10::20::[], 2) 3" 4
+test_aqaml "let x::xs = [1;2;3] in if x = 1 then 1 else 0" 1
+test_aqaml "let x::xs = [1;2;3] in let y::ys = xs in let z::zs = ys in if z = 3 then 1 else 0" 1
+test_aqaml "let f (x::xs, y) z = x - y * z in f ([10;20], 2) 3" 4

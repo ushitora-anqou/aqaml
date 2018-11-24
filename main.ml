@@ -45,6 +45,7 @@ type token =
   | RBracket
   | LRBracket
   | ColonColon
+  | Semicolon
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -70,6 +71,7 @@ let string_of_token = function
   | RBracket -> "]"
   | LRBracket -> "[]"
   | ColonColon -> "::"
+  | Semicolon -> ";"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -148,6 +150,7 @@ let tokenize program =
           match ch with
           | ':' -> ColonColon :: aux i
           | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
+      | ';' -> Semicolon :: aux i
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -197,6 +200,18 @@ let parse tokens =
         match tokens with
         | RParen :: tokens -> (tokens, ast)
         | _ -> raise Unexpected_token )
+    | LBracket :: tokens ->
+      let rec aux = function
+        | Semicolon :: tokens ->
+          let tokens, car = parse_expression tokens in
+          let tokens, cdr = aux tokens in
+          (tokens, Cons (car, cdr))
+        | RBracket :: tokens -> (tokens, IntValue 0) (* [] = IntValue 0 *)
+        | _ -> raise Unexpected_token
+      in
+      let tokens, car = parse_expression tokens in
+      let tokens, cdr = aux tokens in
+      (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
   and parse_funccall tokens =
     let rec aux tokens =
