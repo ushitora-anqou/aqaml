@@ -518,7 +518,7 @@ let rec generate (letfuncs, strings) =
     | 9 -> "r13"
     | _ -> failwith "out-of-bound register"
   in
-  let tag_int reg = sprintf "sal %s, 1\nor %s, 1" reg reg in
+  let tag_int reg = sprintf "lea %s, [%s + %s + 1]" reg reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let tagged_int num = (num lsl 1) lor 1 in
   let rec gen_alloc_block size color tag =
