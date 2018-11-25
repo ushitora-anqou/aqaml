@@ -570,7 +570,7 @@ let rec generate (letfuncs, strings) =
         [ "/* Cons BEGIN */"
         ; aux env cdr
         ; aux env car
-        ; gen_alloc_block 3 0 0
+        ; gen_alloc_block 2 0 0
         ; "pop rdi" (* car *)
         ; "mov [rax + 8], rdi"
         ; "pop rdi" (* cdr *)
@@ -579,7 +579,7 @@ let rec generate (letfuncs, strings) =
         ; "/* Cons END */" ]
     | TupleValue values ->
       (* +1 for header *)
-      let size = List.length values + 1 in
+      let size = List.length values in
       String.concat "\n"
         [ "/* TupleValue BEGIN */"
         ; String.concat "\n" (List.map (aux env) (List.rev values))
