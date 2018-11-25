@@ -97,3 +97,4 @@ test_aqaml "if [1;2;4] <> [1;2;3] then 1 else 0" 1
 test_aqaml "(**)45" 45
 test_aqaml "let v = (*)Uh-huh.)**((
 )*(*Chaos is not kaos*)really?*)45 in v" 45
+test_aqaml "String.length aqaml_str" 15

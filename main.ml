@@ -10,6 +10,8 @@ let read_lines () =
   in
   String.concat "\n" (List.rev (aux []))
 
+let appstr buf = ksprintf (fun str -> Buffer.add_string buf (str ^ "\n"))
+
 let digit x =
   match x with
   | '0' .. '9' -> int_of_char x - int_of_char '0'
@@ -100,7 +102,7 @@ let tokenize program =
         try
           let i, ch = next_char i in
           match ch with
-          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' ->
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' | '.' ->
             Buffer.add_char buf ch ; aux i
           | _ -> (i - 1, Buffer.contents buf)
         with EOF -> (i, Buffer.contents buf)
@@ -180,6 +182,7 @@ let tokenize program =
 
 type ast =
   | IntValue of int
+  | StringValue of string
   | TupleValue of ast list
   | Add of (ast * ast)
   | Sub of (ast * ast)
@@ -204,7 +207,7 @@ exception Unexpected_token
 let parse tokens =
   let rec varnames_in_pattern = function
     (* TODO: much faster algorithm? *)
-    | IntValue _ | EmptyList -> []
+    | IntValue _ | StringValue _ | EmptyList -> []
     | Var varname -> [varname]
     | Cons (car, cdr) ->
       List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
@@ -426,9 +429,13 @@ type environment = {symbols: ast HashMap.t}
 
 let analyze ast =
   let letfuncs = ref [] in
+  let strings = ref [] in
   let rec aux env ast =
     match ast with
     | IntValue _ -> ast
+    | StringValue str ->
+      strings := str :: !strings ;
+      ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
     | EmptyList -> ast
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
@@ -482,6 +489,7 @@ let analyze ast =
       ast
   in
   let symbols = HashMap.empty in
+  let symbols = HashMap.add "String.length" (Var "String.length") symbols in
   let ast = aux {symbols} ast in
   let ast =
     LetFunc
@@ -492,11 +500,11 @@ let analyze ast =
       , IntValue 0 )
   in
   letfuncs := ast :: !letfuncs ;
-  !letfuncs
+  (!letfuncs, !strings)
 
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
-let rec generate letfuncs =
+let rec generate (letfuncs, strings) =
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -522,7 +530,7 @@ let rec generate letfuncs =
       ; "call aqaml_alloc_block@PLT" ]
   in
   let rec gen_assign_pattern env = function
-    | IntValue _ | EmptyList -> "pop rax"
+    | IntValue _ | StringValue _ | EmptyList -> "pop rax"
     | Var varname ->
       let offset = HashMap.find varname env.varoffset in
       String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -544,9 +552,18 @@ let rec generate letfuncs =
             (List.map (gen_assign_pattern env) (List.rev values)) ]
     | _ -> failwith "unexpected ast"
   in
+  let strings2id =
+    let rec aux map = function
+      | str :: strs -> aux (HashMap.add str (make_id "string") map) strs
+      | [] -> map
+    in
+    aux HashMap.empty strings
+  in
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
+    | StringValue str ->
+      sprintf "lea rax, [rip + %s]\npush rax" (HashMap.find str strings2id)
     | EmptyList -> aux env (IntValue 0)
     | Cons (car, cdr) ->
       String.concat "\n"
@@ -671,11 +688,15 @@ let rec generate letfuncs =
         ; aux env else_body
         ; sprintf "%s:" exit_label ]
     | Var varname -> (
-        try
-          let offset = HashMap.find varname env.varoffset in
-          String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
-        with Not_found -> failwith (sprintf "not found in analysis: %s" varname)
-      )
+        if varname = "String.length" then
+          "lea rax, [rip + aqaml_string_length]\npush rax"
+        else
+          try
+            let offset = HashMap.find varname env.varoffset in
+            String.concat "\n"
+              [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
+          with Not_found ->
+            failwith (sprintf "not found in analysis: %s" varname) )
     | FuncCall (func, args) ->
       String.concat "\n"
         [ aux env func
@@ -725,6 +746,23 @@ let rec generate letfuncs =
         [ sprintf "lea rax, [rip + %s]" funcname
         ; sprintf "mov [rbp + %d], rax" offset
         ; aux env body ]
+  in
+  let strings_code =
+    let buf = Buffer.create 80 in
+    appstr buf ".data" ;
+    List.iter
+      (fun str ->
+         let id = HashMap.find str strings2id in
+         let size = (String.length str / 8) + 1 in
+         let space = 7 - (String.length str mod 8) in
+         appstr buf "%s:" id ;
+         appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
+         appstr buf ".ascii \"%s\"" str ;
+         if space <> 0 then appstr buf ".space %d" space ;
+         appstr buf ".byte %d" space )
+      strings ;
+    appstr buf ".text\n" ;
+    Buffer.contents buf
   in
   let letfuncs_code =
     String.concat "\n"
@@ -780,7 +818,7 @@ let rec generate letfuncs =
                ; "pop rax"
                ; "mov rsp, rbp"
                ; "pop rbp"
-               ; "ret\n" ]
+               ; "ret\n\n" ]
            | _ -> failwith "LetFunc should be here")
          letfuncs)
   in
@@ -808,18 +846,30 @@ let rec generate letfuncs =
       ; tag_int "rax"
       ; "ret"
       ; ""
+      ; "aqaml_string_length:"
+      ; "mov rbx, [rax]"
+      ; "shr rbx, 10"
+      ; "lea rbx, [rbx * 8 - 1]"
+      ; "movzx rax, BYTE PTR [rax + rbx + 8]"
+      ; "sub rbx, rax"
+      ; "lea rax, [rbx + rbx + 1]"
+      ; "ret"
+      ; ""
       ; "main:"
       ; "call aqaml_main"
       ; "sar rax, 1"
       ; "ret\n\n" ]
   in
-  main_code ^ letfuncs_code
+  main_code ^ letfuncs_code ^ strings_code
 
 ;;
 let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let ast = parse tokens in
+let ast =
+  LetVar ((Var "aqaml_str", ["aqaml_str"]), StringValue "aqaml_debug_str", ast)
+in
 let code = generate (analyze ast) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
