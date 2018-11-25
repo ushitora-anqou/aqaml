@@ -537,8 +537,8 @@ let rec generate (letfuncs, strings) =
     | Cons (car, cdr) ->
       String.concat "\n"
         [ "pop rax"
+        ; "push QWORD PTR [rax]"
         ; "push QWORD PTR [rax + 8]"
-        ; "push QWORD PTR [rax + 16]"
         ; gen_assign_pattern env cdr
         ; gen_assign_pattern env car ]
     | TupleValue values ->
@@ -546,7 +546,7 @@ let rec generate (letfuncs, strings) =
         [ "pop rax"
         ; String.concat "\n"
             (List.mapi
-               (fun i _ -> sprintf "push QWORD PTR [rax + %d]" ((i + 1) * 8))
+               (fun i _ -> sprintf "push QWORD PTR [rax + %d]" (i * 8))
                values)
         ; String.concat "\n"
             (List.map (gen_assign_pattern env) (List.rev values)) ]
@@ -572,9 +572,9 @@ let rec generate (letfuncs, strings) =
         ; aux env car
         ; gen_alloc_block 2 0 0
         ; "pop rdi" (* car *)
-        ; "mov [rax + 8], rdi"
+        ; "mov [rax], rdi"
         ; "pop rdi" (* cdr *)
-        ; "mov [rax + 16], rdi"
+        ; "mov [rax + 8], rdi"
         ; "push rax"
         ; "/* Cons END */" ]
     | TupleValue values ->
@@ -586,8 +586,7 @@ let rec generate (letfuncs, strings) =
         ; gen_alloc_block size 0 1
         ; String.concat "\n"
             (List.mapi
-               (fun i _ ->
-                  sprintf "pop rdi\nmov [rax + %d], rdi" ((i + 1) * 8) )
+               (fun i _ -> sprintf "pop rdi\nmov [rax + %d], rdi" (i * 8))
                values)
         ; "push rax"
         ; "/* TupleValue END */" ]
@@ -755,8 +754,8 @@ let rec generate (letfuncs, strings) =
          let id = HashMap.find str strings2id in
          let size = (String.length str / 8) + 1 in
          let space = 7 - (String.length str mod 8) in
-         appstr buf "%s:" id ;
          appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
+         appstr buf "%s:" id ;
          appstr buf ".ascii \"%s\"" str ;
          if space <> 0 then appstr buf ".space %d" space ;
          appstr buf ".byte %d" space )
@@ -847,10 +846,10 @@ let rec generate (letfuncs, strings) =
       ; "ret"
       ; ""
       ; "aqaml_string_length:"
-      ; "mov rbx, [rax]"
+      ; "mov rbx, [rax - 8]"
       ; "shr rbx, 10"
       ; "lea rbx, [rbx * 8 - 1]"
-      ; "movzx rax, BYTE PTR [rax + rbx + 8]"
+      ; "movzx rax, BYTE PTR [rax + rbx]"
       ; "sub rbx, rax"
       ; "lea rax, [rbx + rbx + 1]"
       ; "ret"

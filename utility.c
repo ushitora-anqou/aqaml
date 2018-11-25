@@ -12,13 +12,18 @@ typedef struct AQamlBlock {
     unsigned long data[];
 } AQamlBlock;
 
+AQamlBlock *get_block(unsigned long ptr)
+{
+    return (AQamlBlock *)(ptr - 8);
+}
+
 unsigned int aqaml_structural_equal_detail(unsigned long lhs, unsigned long rhs)
 {
     if ((lhs & 1) == 1)  // integer
         return lhs == rhs ? 1 : 0;
 
     // pointer
-    AQamlBlock *lhs_blk = (AQamlBlock *)lhs, *rhs_blk = (AQamlBlock *)rhs;
+    AQamlBlock *lhs_blk = get_block(lhs), *rhs_blk = get_block(rhs);
     if (lhs_blk->header != rhs_blk->header) return 1;
     unsigned long size = lhs_blk->header >> 10;
 
@@ -36,5 +41,5 @@ void *aqaml_alloc_block(unsigned long size, unsigned long color,
     unsigned long *ptr = aqaml_malloc_detail((size + 1) * 8);
     // size in word (54 bits) | color (2 bits) | tag byte (8 bits)
     *ptr = (size << 10) | (color << 8) | tag;
-    return ptr;
+    return (ptr + 1);
 }
