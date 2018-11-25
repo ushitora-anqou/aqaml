@@ -12,6 +12,20 @@ let read_lines () =
 
 let appstr buf = ksprintf (fun str -> Buffer.add_string buf (str ^ "\n"))
 
+let escape_string str =
+  let buf = Buffer.create (String.length str) in
+  let rec aux i =
+    if i < String.length str then (
+      ( match str.[i] with
+        | '\n' -> Buffer.add_string buf "\\n"
+        | '\t' -> Buffer.add_string buf "\\t"
+        | '\\' -> Buffer.add_string buf "\\\\"
+        | '"' -> Buffer.add_string buf "\\\""
+        | ch -> Buffer.add_char buf ch ) ;
+      aux (i + 1) )
+  in
+  aux 0 ; Buffer.contents buf
+
 let digit x =
   match x with
   | '0' .. '9' -> int_of_char x - int_of_char '0'
@@ -117,6 +131,16 @@ let tokenize program =
         let i, ch = next_char i in
         match ch with
         | '"' -> (i, Buffer.contents buf)
+        | '\\' -> (
+            let i, ch = next_char i in
+            match ch with
+            | 'n' -> Buffer.add_char buf '\n' ; aux i
+            | 't' -> Buffer.add_char buf '\t' ; aux i
+            | '\\' -> Buffer.add_char buf '\\' ; aux i
+            | '"' -> Buffer.add_char buf '"' ; aux i
+            | ch ->
+              Buffer.add_char buf '\\' ;
+              aux (i - 1) )
         | _ -> Buffer.add_char buf ch ; aux i
       in
       aux i
@@ -772,7 +796,7 @@ let rec generate (letfuncs, strings) =
          let space = 7 - (String.length str mod 8) in
          appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
          appstr buf "%s:" id ;
-         appstr buf ".ascii \"%s\"" str ;
+         appstr buf ".ascii \"%s\"" (escape_string str) ;
          if space <> 0 then appstr buf ".space %d" space ;
          appstr buf ".byte %d" space )
       strings ;
