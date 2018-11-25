@@ -25,6 +25,7 @@ let make_id base =
 
 type token =
   | IntLiteral of int
+  | StringLiteral of string
   | Plus
   | Minus
   | Star
@@ -51,6 +52,7 @@ type token =
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
+  | StringLiteral str -> "\"" ^ str ^ "\""
   | Plus -> "+"
   | Minus -> "-"
   | Star -> "*"
@@ -109,6 +111,16 @@ let tokenize program =
       in
       aux i
     in
+    let next_string_literal i =
+      let buf = Buffer.create 16 in
+      let rec aux i =
+        let i, ch = next_char i in
+        match ch with
+        | '"' -> (i, Buffer.contents buf)
+        | _ -> Buffer.add_char buf ch ; aux i
+      in
+      aux i
+    in
     let skip_comment i =
       let rec aux i depth =
         let i, ch = next_char i in
@@ -132,6 +144,9 @@ let tokenize program =
       | '0' .. '9' ->
         let i, num = next_int (i - 1) 0 in
         IntLiteral num :: aux i
+      | '"' ->
+        let i, str = next_string_literal i in
+        StringLiteral str :: aux i
       | 'a' .. 'z' | 'A' .. 'Z' ->
         let i, str = next_ident (i - 1) in
         ( match str with
@@ -219,6 +234,7 @@ let parse tokens =
   in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | StringLiteral str :: tokens -> (tokens, StringValue str)
     | Ident id :: tokens -> (tokens, Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
@@ -866,9 +882,6 @@ let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let ast = parse tokens in
-let ast =
-  LetVar ((Var "aqaml_str", ["aqaml_str"]), StringValue "aqaml_debug_str", ast)
-in
 let code = generate (analyze ast) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
