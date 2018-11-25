@@ -104,3 +104,4 @@ String.length str + String.length str2' 35
 test_aqaml 'let [x] = [let x = 10 in x;2] in let (y, z) = (1;2;3,4) in x * y - z' 2
 test_aqaml 'let x = 1;2;3 in x' 3
 test_aqaml 'let f x = x + 1 in f 1; 3' 3
+test_aqaml 'print_string "Hello, world!\n"; 10' 10

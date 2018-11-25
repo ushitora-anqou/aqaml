@@ -257,6 +257,12 @@ let parse tokens =
         [] values
     | _ -> failwith "unexpected ast"
   in
+  let rec is_primary = function
+    | (IntLiteral _ | StringLiteral _ | Ident _ | LRBracket | LParen | LBracket)
+      :: _ ->
+      true
+    | _ -> false
+  in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | StringLiteral str :: tokens -> (tokens, StringValue str)
@@ -282,13 +288,11 @@ let parse tokens =
     | _ -> raise Unexpected_token
   and parse_funccall tokens =
     let rec aux tokens =
-      match tokens with
-      | (IntLiteral _ | Ident _ | LParen) :: _ ->
-        (* if primary *)
+      if is_primary tokens then
         let tokens, arg = parse_primary tokens in
         let tokens, args = aux tokens in
         (tokens, arg :: args)
-      | _ -> (tokens, [])
+      else (tokens, [])
     in
     let tokens, func = parse_primary tokens in
     let tokens, args = aux tokens in
@@ -473,7 +477,10 @@ let parse tokens =
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_pattern tokens = parse_pattern_tuple tokens in
   let tokens, ast = parse_expression tokens in
-  if tokens = [] then ast else failwith "invalid token sequence"
+  if tokens = [] then ast
+  else (
+    eprint_token_list tokens ;
+    failwith "invalid token sequence" )
 
 module HashMap = Map.Make (String)
 
@@ -543,6 +550,7 @@ let analyze ast =
   in
   let symbols = HashMap.empty in
   let symbols = HashMap.add "String.length" (Var "String.length") symbols in
+  let symbols = HashMap.add "print_string" (Var "print_string") symbols in
   let ast = aux {symbols} ast in
   let ast =
     LetFunc
@@ -740,16 +748,16 @@ let rec generate (letfuncs, strings) =
         ; aux env else_body
         ; sprintf "%s:" exit_label ]
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
+    | Var name when name = "String.length" ->
+      String.concat "\n" ["lea rax, [rip + aqaml_string_length]"; "push rax"]
+    | Var name when name = "print_string" ->
+      String.concat "\n" ["lea rax, [rip + aqaml_print_string]"; "push rax"]
     | Var varname -> (
-        if varname = "String.length" then
-          "lea rax, [rip + aqaml_string_length]\npush rax"
-        else
-          try
-            let offset = HashMap.find varname env.varoffset in
-            String.concat "\n"
-              [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
-          with Not_found ->
-            failwith (sprintf "not found in analysis: %s" varname) )
+        try
+          let offset = HashMap.find varname env.varoffset in
+          String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
+        with Not_found -> failwith (sprintf "not found in analysis: %s" varname)
+      )
     | FuncCall (func, args) ->
       String.concat "\n"
         [ aux env func
@@ -900,12 +908,15 @@ let rec generate (letfuncs, strings) =
       ; "ret"
       ; ""
       ; "aqaml_string_length:"
-      ; "mov rbx, [rax - 8]"
-      ; "shr rbx, 10"
-      ; "lea rbx, [rbx * 8 - 1]"
-      ; "movzx rax, BYTE PTR [rax + rbx]"
-      ; "sub rbx, rax"
-      ; "lea rax, [rbx + rbx + 1]"
+      ; "mov rdi, rax"
+      ; "call aqaml_string_length_detail@PLT"
+      ; tag_int "rax"
+      ; "ret"
+      ; ""
+      ; "aqaml_print_string:"
+      ; "mov rdi, rax"
+      ; "call aqaml_print_string_detail@PLT"
+      ; "mov rax, 1" (* return unit value *)
       ; "ret"
       ; ""
       ; "main:"
