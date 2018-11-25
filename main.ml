@@ -238,6 +238,7 @@ type ast =
   | LetFunc of (bool * string * pattern list * ast * ast)
   | Cons of (ast * ast)
   | EmptyList
+  | ExprSeq of ast list
 
 and pattern = ast * string list
 
@@ -269,13 +270,13 @@ let parse tokens =
     | LBracket :: tokens ->
       let rec aux = function
         | Semicolon :: tokens ->
-          let tokens, car = parse_expression tokens in
+          let tokens, car = parse_let tokens in
           let tokens, cdr = aux tokens in
           (tokens, Cons (car, cdr))
         | RBracket :: tokens -> (tokens, EmptyList)
         | _ -> raise Unexpected_token
       in
-      let tokens, car = parse_expression tokens in
+      let tokens, car = parse_let tokens in
       let tokens, cdr = aux tokens in
       (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
@@ -370,10 +371,10 @@ let parse tokens =
         let tokens, cond = parse_expression tokens in
         match tokens with
         | Then :: tokens -> (
-            let tokens, then_body = parse_expression tokens in
+            let tokens, then_body = parse_let tokens in
             match tokens with
             | Else :: tokens ->
-              let tokens, else_body = parse_expression tokens in
+              let tokens, else_body = parse_let tokens in
               (tokens, IfThenElse (cond, then_body, else_body))
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
@@ -416,7 +417,18 @@ let parse tokens =
               (tokens, LetFunc (recursive, name, args, func, body))
             | _ -> raise Unexpected_token ) )
     | tokens -> parse_if tokens
-  and parse_expression tokens = parse_let tokens
+  and parse_expr_sequence tokens =
+    let rec aux = function
+      | Semicolon :: tokens ->
+        let tokens, expr = parse_let tokens in
+        let tokens, exprs = aux tokens in
+        (tokens, expr :: exprs)
+      | tokens -> (tokens, [])
+    in
+    let tokens, expr = parse_let tokens in
+    let tokens, exprs = aux tokens in
+    (tokens, ExprSeq (expr :: exprs))
+  and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | Ident id :: tokens -> (tokens, Var id)
@@ -489,6 +501,7 @@ let analyze ast =
     | LessThanEqual (lhs, rhs) -> LessThanEqual (aux env lhs, aux env rhs)
     | IfThenElse (cond, then_body, else_body) ->
       IfThenElse (aux env cond, aux env then_body, aux env else_body)
+    | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Var name -> (
         try HashMap.find name env.symbols with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) )
@@ -726,6 +739,7 @@ let rec generate (letfuncs, strings) =
         ; sprintf "%s:" false_label
         ; aux env else_body
         ; sprintf "%s:" exit_label ]
+    | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
     | Var varname -> (
         if varname = "String.length" then
           "lea rax, [rip + aqaml_string_length]\npush rax"
