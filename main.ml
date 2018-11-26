@@ -953,7 +953,7 @@ let rec generate (letfuncs, strings) =
       ; ""
       ; "main:"
       ; "call aqaml_main"
-      ; "sar rax, 1"
+      ; "mov rax, 0"
       ; "ret\n\n" ]
   in
   main_code ^ letfuncs_code ^ strings_code
