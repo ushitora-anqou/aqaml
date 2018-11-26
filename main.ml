@@ -237,7 +237,7 @@ type ast =
   | StructInequal of (ast * ast)
   | LessThan of (ast * ast)
   | LessThanEqual of (ast * ast)
-  | IfThenElse of (ast * ast * ast)
+  | IfThenElse of (ast * ast * ast option)
   | Var of string
   | FuncCall of (ast * ast list)
   | LetVar of (pattern * ast * ast)
@@ -385,8 +385,8 @@ let parse tokens =
             match tokens with
             | Else :: tokens ->
               let tokens, else_body = parse_let tokens in
-              (tokens, IfThenElse (cond, then_body, else_body))
-            | _ -> raise Unexpected_token )
+              (tokens, IfThenElse (cond, then_body, Some else_body))
+            | _ -> (tokens, IfThenElse (cond, then_body, None)) )
         | _ -> raise Unexpected_token )
     | tokens -> parse_tuple tokens
   and parse_let = function
@@ -521,8 +521,10 @@ let analyze ast =
     | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
     | LessThan (lhs, rhs) -> LessThan (aux env lhs, aux env rhs)
     | LessThanEqual (lhs, rhs) -> LessThanEqual (aux env lhs, aux env rhs)
-    | IfThenElse (cond, then_body, else_body) ->
-      IfThenElse (aux env cond, aux env then_body, aux env else_body)
+    | IfThenElse (cond, then_body, Some else_body) ->
+      IfThenElse (aux env cond, aux env then_body, Some (aux env else_body))
+    | IfThenElse (cond, then_body, None) ->
+      IfThenElse (aux env cond, aux env then_body, None)
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Var name -> (
         try HashMap.find name env.symbols with Not_found ->
@@ -761,7 +763,9 @@ let rec generate (letfuncs, strings) =
         ; aux env then_body
         ; sprintf "jmp %s" exit_label
         ; sprintf "%s:" false_label
-        ; aux env else_body
+        ; ( match else_body with
+            | None -> aux env (IntValue 0) (* unit value is IntValue 0 *)
+            | Some else_body -> aux env else_body )
         ; sprintf "%s:" exit_label ]
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
     | Var name when name = "String.length" ->
