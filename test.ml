@@ -208,24 +208,43 @@ test
    let sub x y = x - y in
    let div x y = x / y in
    f ([add 10 2; sub 5 1], div 6 4) 10)
-  18;
-test (let f ([a;b;c], [d;e;f], [g;h;i]) = f in f ([1;2;3], [4;5;6], [7;8;9])) 6;
-test (if [1;2;3] = [1;2;3] then 1 else 0) 1;
-test (if [1;2;4] = [1;2;3] then 1 else 0) 0;
-test (if [1;2;3] <> [1;2;3] then 1 else 0) 0;
-test (if [1;2;4] <> [1;2;3] then 1 else 0) 1;
-test ((**)45) 45;
-test (let v = (*)Uh-huh.)**((
-                #)*(*Chaos is not kaos*)really?*)45 in v) 45;
-test (
-  let str = "aqaml_\t\ndebug_str" in
-  let str2 = "aqaml_debug\\\"_str2" in
-  String.length str + String.length str2) 35;
-test (let [x] = [let x = 10 in x;2] in let (y, z) = (1;2;3,4) in x * y - z) 2;
-test (let x = 1;2;3 in x) 3;
-test (let f x = x + 1 in f 1; 3) 3;
-test (print_string "Hello, world!\n"; 10) 10;
-test (if true then print_string "Happy, Halloween\n"; 20) 20;
-test (if () = () then 1 else 0) 1;
+  18 ;
+test
+  (let f ([a; b; c], [d; e; f], [g; h; i]) = f in
+   f ([1; 2; 3], [4; 5; 6], [7; 8; 9]))
+  6 ;
+test (if [1; 2; 3] = [1; 2; 3] then 1 else 0) 1 ;
+test (if [1; 2; 4] = [1; 2; 3] then 1 else 0) 0 ;
+test (if [1; 2; 3] <> [1; 2; 3] then 1 else 0) 0 ;
+test (if [1; 2; 4] <> [1; 2; 3] then 1 else 0) 1 ;
+test
+  (let str = "aqaml_\t\ndebug_str" in
+   let str2 = "aqaml_debug\\\"_str2" in
+   String.length str + String.length str2)
+  35 ;
+test
+  (let [x] =
+     [ (let x = 10 in
+        x ; 2) ]
+   in
+   let y, z = 1 ; 2 ; (3, 4) in
+   (x * y) - z)
+  2 ;
+test
+  (let x = 1 ; 2 ; 3 in
+   x)
+  3 ;
+test
+  (let f x = x + 1 in
+   f 1 ; 3)
+  3 ;
+test
+  ( print_string "Hello, world!\n" ;
+    10 )
+  10 ;
+test
+  ( if true then print_string "Happy, Halloween\n" ;
+    20 )
+  20 ;
+test (if () = () then 1 else 0) 1 ;
 test (if (if false then print_string "Never shown") = () then 1 else 0) 1
-
