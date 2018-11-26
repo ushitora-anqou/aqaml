@@ -47,6 +47,7 @@ type token =
   | Ident of string
   | LParen
   | RParen
+  | LRParen
   | Let
   | Equal
   | In
@@ -75,6 +76,7 @@ let string_of_token = function
   | Ident str -> str
   | LParen -> "("
   | RParen -> ")"
+  | LRParen -> "()"
   | Let -> "let"
   | Equal -> "="
   | In -> "in"
@@ -196,6 +198,7 @@ let tokenize program =
           | '*' ->
             let i = skip_comment i in
             aux i
+          | ')' -> LRParen :: aux i
           | _ -> LParen :: aux (i - 1) )
       | ')' -> RParen :: aux i
       | '<' -> (
@@ -227,6 +230,7 @@ let tokenize program =
 
 type ast =
   | IntValue of int
+  | UnitValue
   | StringValue of string
   | TupleValue of ast list
   | Add of (ast * ast)
@@ -253,7 +257,7 @@ exception Unexpected_token
 let parse tokens =
   let rec varnames_in_pattern = function
     (* TODO: much faster algorithm? *)
-    | IntValue _ | StringValue _ | EmptyList -> []
+    | IntValue _ | UnitValue | StringValue _ | EmptyList -> []
     | Var varname -> [varname]
     | Cons (car, cdr) ->
       List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
@@ -264,7 +268,8 @@ let parse tokens =
     | _ -> failwith "unexpected ast"
   in
   let rec is_primary = function
-    | (IntLiteral _ | StringLiteral _ | Ident _ | LRBracket | LParen | LBracket)
+    | ( IntLiteral _ | StringLiteral _ | Ident _ | LRBracket | LParen
+      | LBracket | LRParen )
       :: _ ->
       true
     | _ -> false
@@ -272,6 +277,7 @@ let parse tokens =
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | StringLiteral str :: tokens -> (tokens, StringValue str)
+    | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
@@ -506,12 +512,11 @@ let analyze ast =
   let strings = ref [] in
   let rec aux env ast =
     match ast with
-    | IntValue _ -> ast
+    | IntValue _ | UnitValue | EmptyList -> ast
     | StringValue str ->
       strings := str :: !strings ;
       ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
-    | EmptyList -> ast
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -609,7 +614,7 @@ let rec generate (letfuncs, strings) =
       ; "call aqaml_alloc_block@PLT" ]
   in
   let rec gen_assign_pattern env = function
-    | IntValue _ | StringValue _ | EmptyList -> "pop rax"
+    | IntValue _ | UnitValue | StringValue _ | EmptyList -> "pop rax"
     | Var varname ->
       let offset = HashMap.find varname env.varoffset in
       String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -641,9 +646,9 @@ let rec generate (letfuncs, strings) =
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
+    | UnitValue | EmptyList -> aux env (IntValue 0)
     | StringValue str ->
       sprintf "lea rax, [rip + %s]\npush rax" (HashMap.find str strings2id)
-    | EmptyList -> aux env (IntValue 0)
     | Cons (car, cdr) ->
       String.concat "\n"
         [ "/* Cons BEGIN */"

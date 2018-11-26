@@ -107,3 +107,5 @@ test_aqaml 'exit (let f x = x + 1 in f 1; 3)' 3
 test_aqaml 'exit (print_string "Hello, world!\n"; 10)' 10
 test_aqaml ';;42;;let x = 10 in x;; let y = 20 in exit y' 20
 test_aqaml 'if true then print_string "Happy, Halloween\n"; 20' 20
+test_aqaml 'if () = () then 1 else 0' 1
+test_aqaml 'if (if false then print_string "Never shown") = () then 1 else 0' 1
