@@ -551,6 +551,7 @@ let analyze ast =
   let symbols = HashMap.empty in
   let symbols = HashMap.add "String.length" (Var "String.length") symbols in
   let symbols = HashMap.add "print_string" (Var "print_string") symbols in
+  let symbols = HashMap.add "exit" (Var "exit") symbols in
   let ast = aux {symbols} ast in
   let ast =
     LetFunc
@@ -752,6 +753,8 @@ let rec generate (letfuncs, strings) =
       String.concat "\n" ["lea rax, [rip + aqaml_string_length]"; "push rax"]
     | Var name when name = "print_string" ->
       String.concat "\n" ["lea rax, [rip + aqaml_print_string]"; "push rax"]
+    | Var name when name = "exit" ->
+      String.concat "\n" ["lea rax, [rip + aqaml_exit]"; "push rax"]
     | Var varname -> (
         try
           let offset = HashMap.find varname env.varoffset in
@@ -918,6 +921,11 @@ let rec generate (letfuncs, strings) =
       ; "call aqaml_print_string_detail@PLT"
       ; "mov rax, 1" (* return unit value *)
       ; "ret"
+      ; ""
+      ; "aqaml_exit:"
+      ; "mov rdi, rax"
+      ; "shr rdi, 1"
+      ; "call exit@PLT"
       ; ""
       ; "main:"
       ; "call aqaml_main"
