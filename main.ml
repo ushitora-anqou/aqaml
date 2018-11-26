@@ -63,6 +63,7 @@ type token =
   | LRBracket
   | ColonColon
   | Semicolon
+  | SemicolonSemicolon
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -90,6 +91,7 @@ let string_of_token = function
   | LRBracket -> "[]"
   | ColonColon -> "::"
   | Semicolon -> ";"
+  | SemicolonSemicolon -> ";;"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -213,7 +215,11 @@ let tokenize program =
           match ch with
           | ':' -> ColonColon :: aux i
           | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
-      | ';' -> Semicolon :: aux i
+      | ';' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ';' -> SemicolonSemicolon :: aux i
+          | _ -> Semicolon :: aux (i - 1) )
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -476,11 +482,20 @@ let parse tokens =
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_pattern tokens = parse_pattern_tuple tokens in
-  let tokens, ast = parse_expression tokens in
-  if tokens = [] then ast
-  else (
-    eprint_token_list tokens ;
-    failwith "invalid token sequence" )
+  let parse_expressions tokens =
+    (* correct? *)
+    let rec aux exprs = function
+      | SemicolonSemicolon :: tokens -> aux exprs tokens
+      | [] -> exprs
+      | tokens ->
+        let tokens, expr = parse_expression tokens in
+        aux (expr :: exprs) tokens
+    in
+    List.rev (aux [] tokens)
+  in
+  let exprs = parse_expressions tokens in
+  (* TODO: multiple expressions *)
+  List.nth exprs (List.length exprs - 1)
 
 module HashMap = Map.Make (String)
 
