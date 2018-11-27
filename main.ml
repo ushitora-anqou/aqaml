@@ -244,8 +244,8 @@ type ast =
   | IfThenElse of (ast * ast * ast option)
   | Var of string
   | FuncCall of (ast * ast list)
-  | LetVar of (pattern * ast * ast)
-  | LetFunc of (bool * string * pattern list * ast * ast)
+  | LetVar of (pattern * ast * ast option)
+  | LetFunc of (bool * string * pattern list * ast * ast option)
   | Cons of (ast * ast)
   | EmptyList
   | ExprSeq of ast list
@@ -411,8 +411,8 @@ let parse tokens =
             match tokens with
             | In :: tokens ->
                 let tokens, rhs = parse_expression tokens in
-                (tokens, LetVar ((bind, varnames), lhs, rhs))
-            | _ -> raise Unexpected_token )
+                (tokens, LetVar ((bind, varnames), lhs, Some rhs))
+            | _ -> (tokens, LetVar ((bind, varnames), lhs, None)) )
         | _ -> (
             (* define function *)
             let name =
@@ -430,8 +430,8 @@ let parse tokens =
             match tokens with
             | In :: tokens ->
                 let tokens, body = parse_expression tokens in
-                (tokens, LetFunc (recursive, name, args, func, body))
-            | _ -> raise Unexpected_token ) )
+                (tokens, LetFunc (recursive, name, args, func, Some body))
+            | _ -> (tokens, LetFunc (recursive, name, args, func, None)) ) )
     | tokens -> parse_if tokens
   and parse_expr_sequence tokens =
     let rec aux = function
@@ -542,7 +542,10 @@ let analyze ast =
           | [] -> symbols
         in
         let env' = {symbols= add_symbols env.symbols varnames} in
-        LetVar ((bind, varnames), aux env lhs, aux env' rhs)
+        LetVar
+          ( (bind, varnames)
+          , aux env lhs
+          , match rhs with Some rhs -> Some (aux env' rhs) | None -> None )
     | LetFunc (recursive, funcname, args, func, body) ->
         let gen_funcname = make_id funcname in
         let funcvar = Var gen_funcname in
@@ -565,7 +568,14 @@ let analyze ast =
         let func = aux env' func in
         let env' = {symbols= HashMap.add funcname funcvar env.symbols} in
         let ast =
-          LetFunc (recursive, gen_funcname, args, func, aux env' body)
+          LetFunc
+            ( recursive
+            , gen_funcname
+            , args
+            , func
+            , match body with
+              | Some body -> Some (aux env' body)
+              | None -> None )
         in
         letfuncs := ast :: !letfuncs ;
         ast
@@ -581,7 +591,7 @@ let analyze ast =
       , "aqaml_main"
       , [(Var "aqaml_main_dummy", ["aqaml_main_dummy"])]
       , ast
-      , IntValue 0 )
+      , Some (IntValue 0) )
   in
   letfuncs := ast :: !letfuncs ;
   (!letfuncs, !strings)
@@ -823,7 +833,10 @@ let rec generate (letfuncs, strings) =
                aux 1 env.varoffset varnames) }
         in
         let assign_code = gen_assign_pattern env' bind in
-        String.concat "\n" [aux env lhs; assign_code; aux env' rhs]
+        String.concat "\n"
+          [ aux env lhs
+          ; assign_code
+          ; (match rhs with Some rhs -> aux env' rhs | None -> "nop") ]
     | LetFunc (_, funcname, _, _, body) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
@@ -833,7 +846,7 @@ let rec generate (letfuncs, strings) =
         String.concat "\n"
           [ sprintf "lea rax, [rip + %s]" funcname
           ; sprintf "mov [rbp + %d], rax" offset
-          ; aux env body ]
+          ; (match body with Some body -> aux env body | None -> "nop") ]
   in
   let strings_code =
     let buf = Buffer.create 80 in

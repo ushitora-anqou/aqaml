@@ -1,3 +1,5 @@
+let id x = x
+
 ;;
 let test got expect =
   if got <> expect then ( print_string "ERROR" ; exit 1 )
