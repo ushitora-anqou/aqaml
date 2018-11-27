@@ -894,7 +894,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "%s:" id ;
         appstr buf ".ascii \"%s\"" (escape_string str) ;
         if space <> 0 then appstr buf ".space %d" space ;
-        appstr buf ".byte %d" space )
+        appstr buf ".byte %d\n" space )
       strings ;
     appstr buf ".text\n" ;
     Buffer.contents buf
