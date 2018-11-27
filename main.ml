@@ -499,15 +499,13 @@ let parse tokens =
     in
     List.rev (aux [] tokens)
   in
-  let exprs = parse_expressions tokens in
-  (* TODO: multiple expressions *)
-  List.nth exprs (List.length exprs - 1)
+  parse_expressions tokens
 
 module HashMap = Map.Make (String)
 
 type environment = {symbols: ast HashMap.t}
 
-let analyze ast =
+let analyze asts =
   let letfuncs = ref [] in
   let strings = ref [] in
   let toplevel = Hashtbl.create 16 in
@@ -585,13 +583,15 @@ let analyze ast =
   Hashtbl.add toplevel "String.length" (Var "String.length") ;
   Hashtbl.add toplevel "print_string" (Var "print_string") ;
   Hashtbl.add toplevel "exit" (Var "exit") ;
-  let ast = aux {symbols= HashMap.empty} ast in
+  let asts =
+    List.map (function ast -> aux {symbols= HashMap.empty} ast) asts
+  in
   let ast =
     LetFunc
       ( false
       , "aqaml_main"
       , [(Var "aqaml_main_dummy", ["aqaml_main_dummy"])]
-      , ast
+      , ExprSeq asts
       , Some (IntValue 0) )
   in
   letfuncs := ast :: !letfuncs ;
@@ -834,20 +834,23 @@ let rec generate (letfuncs, strings) =
                aux 1 env.varoffset varnames) }
         in
         let assign_code = gen_assign_pattern env' bind in
+        (* -1234 is dummy *)
         String.concat "\n"
           [ aux env lhs
           ; assign_code
-          ; (match rhs with Some rhs -> aux env' rhs | None -> "nop") ]
+          ; (match rhs with Some rhs -> aux env' rhs | None -> "push -1234") ]
     | LetFunc (_, funcname, _, _, body) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
         let env =
           {offset; varoffset= HashMap.add funcname offset env.varoffset}
         in
+        (* -1234 is dummy *)
         String.concat "\n"
           [ sprintf "lea rax, [rip + %s]" funcname
           ; sprintf "mov [rbp + %d], rax" offset
-          ; (match body with Some body -> aux env body | None -> "nop") ]
+          ; (match body with Some body -> aux env body | None -> "push -1234")
+          ]
   in
   let strings_code =
     let buf = Buffer.create 80 in
@@ -976,7 +979,7 @@ let rec generate (letfuncs, strings) =
 let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
-let ast = parse tokens in
-let code = generate (analyze ast) in
+let asts = parse tokens in
+let code = generate (analyze asts) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
