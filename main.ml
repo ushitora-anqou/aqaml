@@ -510,6 +510,7 @@ type environment = {symbols: ast HashMap.t}
 let analyze ast =
   let letfuncs = ref [] in
   let strings = ref [] in
+  let toplevel = Hashtbl.create 16 in
   let rec aux env ast =
     match ast with
     | IntValue _ | UnitValue | EmptyList -> ast
@@ -532,8 +533,9 @@ let analyze ast =
         IfThenElse (aux env cond, aux env then_body, None)
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Var name -> (
-      try HashMap.find name env.symbols with Not_found ->
-        failwith (sprintf "not found in analysis: %s" name) )
+      try HashMap.find name env.symbols with Not_found -> (
+        try Hashtbl.find toplevel name with Not_found ->
+          failwith (sprintf "not found in analysis: %s" name) ) )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
     | LetVar ((bind, varnames), lhs, rhs) ->
         let rec add_symbols symbols = function
@@ -580,11 +582,10 @@ let analyze ast =
         letfuncs := ast :: !letfuncs ;
         ast
   in
-  let symbols = HashMap.empty in
-  let symbols = HashMap.add "String.length" (Var "String.length") symbols in
-  let symbols = HashMap.add "print_string" (Var "print_string") symbols in
-  let symbols = HashMap.add "exit" (Var "exit") symbols in
-  let ast = aux {symbols} ast in
+  Hashtbl.add toplevel "String.length" (Var "String.length") ;
+  Hashtbl.add toplevel "print_string" (Var "print_string") ;
+  Hashtbl.add toplevel "exit" (Var "exit") ;
+  let ast = aux {symbols= HashMap.empty} ast in
   let ast =
     LetFunc
       ( false
