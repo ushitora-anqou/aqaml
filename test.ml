@@ -1,5 +1,7 @@
 let id x = x
 
+let pi = 3
+
 ;;
 print_string "Test starts.\n"
 
@@ -252,4 +254,6 @@ test
     20 )
   20 ;
 test (if () = () then 1 else 0) 1 ;
-test (if (if false then print_string "Never shown") = () then 1 else 0) 1
+test (if (if false then print_string "Never shown") = () then 1 else 0) 1 ;
+test (id 10) 10 ;
+test pi 3

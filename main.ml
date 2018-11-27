@@ -443,7 +443,8 @@ let parse tokens =
     in
     let tokens, expr = parse_let tokens in
     let tokens, exprs = aux tokens in
-    (tokens, ExprSeq (expr :: exprs))
+    if List.length exprs = 0 then (tokens, expr)
+    else (tokens, ExprSeq (expr :: exprs))
   and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
@@ -535,18 +536,15 @@ let analyze asts =
         try Hashtbl.find toplevel name with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) ) )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
-    | LetVar ((bind, varnames), lhs, rhs) ->
+    | LetVar ((bind, varnames), lhs, Some rhs) ->
         let rec add_symbols symbols = function
           | varname :: varnames ->
               add_symbols (HashMap.add varname (Var varname) symbols) varnames
           | [] -> symbols
         in
         let env' = {symbols= add_symbols env.symbols varnames} in
-        LetVar
-          ( (bind, varnames)
-          , aux env lhs
-          , match rhs with Some rhs -> Some (aux env' rhs) | None -> None )
-    | LetFunc (recursive, funcname, args, func, body) ->
+        LetVar ((bind, varnames), aux env lhs, Some (aux env' rhs))
+    | LetFunc (recursive, funcname, args, func, Some body) ->
         let gen_funcname = make_id funcname in
         let funcvar = Var gen_funcname in
         let env' =
@@ -568,30 +566,67 @@ let analyze asts =
         let func = aux env' func in
         let env' = {symbols= HashMap.add funcname funcvar env.symbols} in
         let ast =
-          LetFunc
-            ( recursive
-            , gen_funcname
-            , args
-            , func
-            , match body with
-              | Some body -> Some (aux env' body)
-              | None -> None )
+          LetFunc (recursive, gen_funcname, args, func, Some (aux env' body))
         in
         letfuncs := ast :: !letfuncs ;
         ast
+    | _ -> failwith "unexpected ast"
   in
   Hashtbl.add toplevel "String.length" (Var "String.length") ;
   Hashtbl.add toplevel "print_string" (Var "print_string") ;
   Hashtbl.add toplevel "exit" (Var "exit") ;
-  let asts =
-    List.map (function ast -> aux {symbols= HashMap.empty} ast) asts
+  let ast =
+    (* Convert None in LetVar and LetFunc to Some when analyzing.
+       * The argument 'pending' prevents too many ExprSeq. *)
+    let rec aux' pending = function
+      | LetVar ((bind, varnames), lhs, None) :: asts ->
+          List.iter
+            (fun varname -> Hashtbl.add toplevel varname (Var varname))
+            varnames ;
+          ExprSeq
+            (List.rev
+               ( LetVar
+                   ( (bind, varnames)
+                   , aux {symbols= HashMap.empty} lhs
+                   , Some (aux' [] asts) )
+               :: pending ))
+      | LetFunc (recursive, funcname, args, func, None) :: asts ->
+          let gen_funcname = make_id funcname in
+          let funcvar = Var gen_funcname in
+          let env =
+            { symbols=
+                List.fold_left
+                  (fun symbols argname ->
+                    HashMap.add argname (Var argname) symbols )
+                  HashMap.empty
+                  (List.fold_left
+                     (fun a (_, argnames) -> List.rev_append a argnames)
+                     [] args) }
+          in
+          (* if recursive then funcname should be in env *)
+          let env =
+            { symbols=
+                ( if recursive then HashMap.add funcname funcvar env.symbols
+                else env.symbols ) }
+          in
+          let func = aux env func in
+          Hashtbl.add toplevel funcname funcvar ;
+          let ast =
+            LetFunc (recursive, gen_funcname, args, func, Some (aux' [] asts))
+          in
+          letfuncs := ast :: !letfuncs ;
+          ExprSeq (List.rev (ast :: pending))
+      | ast :: asts -> aux' (aux {symbols= HashMap.empty} ast :: pending) asts
+      | [] -> ExprSeq (List.rev (UnitValue :: pending))
+    in
+    aux' [] asts
   in
   let ast =
     LetFunc
       ( false
       , "aqaml_main"
       , [(Var "aqaml_main_dummy", ["aqaml_main_dummy"])]
-      , ExprSeq asts
+      , ast
       , Some (IntValue 0) )
   in
   letfuncs := ast :: !letfuncs ;
@@ -818,7 +853,7 @@ let rec generate (letfuncs, strings) =
           ; "pop r10"
           ; "call r10"
           ; "push rax" ]
-    | LetVar ((bind, varnames), lhs, rhs) ->
+    | LetVar ((bind, varnames), lhs, Some rhs) ->
         let offset = env.offset - (List.length varnames * 8) in
         stack_size := max !stack_size (-offset) ;
         let env' =
@@ -834,23 +869,18 @@ let rec generate (letfuncs, strings) =
                aux 1 env.varoffset varnames) }
         in
         let assign_code = gen_assign_pattern env' bind in
-        (* -1234 is dummy *)
-        String.concat "\n"
-          [ aux env lhs
-          ; assign_code
-          ; (match rhs with Some rhs -> aux env' rhs | None -> "push -1234") ]
-    | LetFunc (_, funcname, _, _, body) ->
+        String.concat "\n" [aux env lhs; assign_code; aux env' rhs]
+    | LetFunc (_, funcname, _, _, Some body) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
         let env =
           {offset; varoffset= HashMap.add funcname offset env.varoffset}
         in
-        (* -1234 is dummy *)
         String.concat "\n"
           [ sprintf "lea rax, [rip + %s]" funcname
           ; sprintf "mov [rbp + %d], rax" offset
-          ; (match body with Some body -> aux env body | None -> "push -1234")
-          ]
+          ; aux env body ]
+    | _ -> failwith "unexpected ast"
   in
   let strings_code =
     let buf = Buffer.create 80 in
