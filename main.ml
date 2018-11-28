@@ -696,8 +696,20 @@ let rec generate (letfuncs, strings) =
       ; sprintf "mov rdx, %d" tag
       ; "call aqaml_alloc_block@PLT" ]
   in
-  let rec gen_assign_pattern env exit_label = function
-    | IntValue _ | UnitValue | StringValue _ | EmptyList -> "pop rax"
+  let rec gen_assign_pattern env exp_label = function
+    | UnitValue | EmptyList -> gen_assign_pattern env exp_label @@ IntValue 0
+    | IntValue num ->
+        let buf = Buffer.create 128 in
+        let exit_label = make_label () in
+        appstr buf "/* pattern match IntValue BEGIN */" ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int num ;
+        appfmt buf "je %s" exit_label ;
+        appfmt buf "jmp %s" exp_label ;
+        appfmt buf "%s:" exit_label ;
+        appstr buf "/* pattern match IntValue END */" ;
+        Buffer.contents buf
+    | StringValue _ -> "pop rax" (* TODO: string pattern match *)
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -706,8 +718,8 @@ let rec generate (letfuncs, strings) =
           [ "pop rax"
           ; "push QWORD PTR [rax]"
           ; "push QWORD PTR [rax + 8]"
-          ; gen_assign_pattern env exit_label cdr
-          ; gen_assign_pattern env exit_label car ]
+          ; gen_assign_pattern env exp_label cdr
+          ; gen_assign_pattern env exp_label car ]
     | TupleValue values ->
         String.concat "\n"
           [ "pop rax"
@@ -716,11 +728,11 @@ let rec generate (letfuncs, strings) =
                  (fun i _ -> sprintf "push QWORD PTR [rax + %d]" (i * 8))
                  values)
           ; String.concat "\n"
-              (List.map (gen_assign_pattern env exit_label) (List.rev values))
+              (List.map (gen_assign_pattern env exp_label) (List.rev values))
           ]
     | _ -> failwith "unexpected ast"
   in
-  let rec gen_assign_pattern_or_throw env ptn =
+  let rec gen_assign_pattern_or_raise env ptn =
     let exp_label = make_label () in
     let exit_label = make_label () in
     let assign_code = gen_assign_pattern env exp_label ptn in
@@ -730,7 +742,7 @@ let rec generate (letfuncs, strings) =
     appfmt buf "%s:" exp_label ;
     appstr buf "mov rax, 1" ;
     appstr buf "call exit@PLT" ;
-    (* TODO: throw *)
+    (* TODO: raise *)
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   in
@@ -914,7 +926,7 @@ let rec generate (letfuncs, strings) =
         in
         let buf = Buffer.create 256 in
         appstr buf @@ aux env lhs ;
-        appstr buf @@ gen_assign_pattern_or_throw env' bind ;
+        appstr buf @@ gen_assign_pattern_or_raise env' bind ;
         appstr buf @@ aux env' rhs ;
         Buffer.contents buf
     | LetFunc (_, funcname, _, _, Some body) ->
@@ -1033,7 +1045,7 @@ let rec generate (letfuncs, strings) =
                            args))
                  ; String.concat "\n"
                      (List.map
-                        (fun (ptn, _) -> gen_assign_pattern_or_throw env ptn)
+                        (fun (ptn, _) -> gen_assign_pattern_or_raise env ptn)
                         args)
                  ; ( if recursive then
                      sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
@@ -1089,6 +1101,7 @@ let rec generate (letfuncs, strings) =
       ; "call exit@PLT"
       ; ""
       ; "main:"
+      ; "mov rax, 1"
       ; "call aqaml_main"
       ; "mov rax, 0"
       ; "ret\n\n" ]
