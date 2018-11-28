@@ -39,7 +39,7 @@ let make_id base =
 
 type token =
   | IntLiteral of int
-  | StringLiteral of string
+  | StringLiteral of string * string
   | Plus
   | Minus
   | Star
@@ -68,7 +68,7 @@ type token =
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
-  | StringLiteral str -> "\"" ^ str ^ "\""
+  | StringLiteral (_, str) -> "\"" ^ str ^ "\""
   | Plus -> "+"
   | Minus -> "-"
   | Star -> "*"
@@ -174,7 +174,7 @@ let tokenize program =
           IntLiteral num :: aux i
       | '"' ->
           let i, str = next_string_literal i in
-          StringLiteral str :: aux i
+          StringLiteral (make_id "string", str) :: aux i
       | 'a' .. 'z' | 'A' .. 'Z' ->
           let i, str = next_ident (i - 1) in
           ( match str with
@@ -231,7 +231,7 @@ let tokenize program =
 type ast =
   | IntValue of int
   | UnitValue
-  | StringValue of string
+  | StringValue of string * string
   | TupleValue of ast list
   | Add of (ast * ast)
   | Sub of (ast * ast)
@@ -276,7 +276,7 @@ let parse tokens =
   in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
-    | StringLiteral str :: tokens -> (tokens, StringValue str)
+    | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
@@ -513,8 +513,8 @@ let analyze asts =
   let rec aux env ast =
     match ast with
     | IntValue _ | UnitValue | EmptyList -> ast
-    | StringValue str ->
-        strings := str :: !strings ;
+    | StringValue _ ->
+        strings := ast :: !strings ;
         ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
@@ -682,19 +682,11 @@ let rec generate (letfuncs, strings) =
               (List.map (gen_assign_pattern env) (List.rev values)) ]
     | _ -> failwith "unexpected ast"
   in
-  let strings2id =
-    let rec aux map = function
-      | str :: strs -> aux (HashMap.add str (make_id "string") map) strs
-      | [] -> map
-    in
-    aux HashMap.empty strings
-  in
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
     | UnitValue | EmptyList -> aux env (IntValue 0)
-    | StringValue str ->
-        sprintf "lea rax, [rip + %s]\npush rax" (HashMap.find str strings2id)
+    | StringValue (id, _) -> sprintf "lea rax, [rip + %s]\npush rax" id
     | Cons (car, cdr) ->
         String.concat "\n"
           [ "/* Cons BEGIN */"
@@ -886,15 +878,16 @@ let rec generate (letfuncs, strings) =
     let buf = Buffer.create 80 in
     appstr buf ".data" ;
     List.iter
-      (fun str ->
-        let id = HashMap.find str strings2id in
-        let size = (String.length str / 8) + 1 in
-        let space = 7 - (String.length str mod 8) in
-        appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
-        appstr buf "%s:" id ;
-        appstr buf ".ascii \"%s\"" (escape_string str) ;
-        if space <> 0 then appstr buf ".space %d" space ;
-        appstr buf ".byte %d\n" space )
+      (function
+        | StringValue (id, str) ->
+            let size = (String.length str / 8) + 1 in
+            let space = 7 - (String.length str mod 8) in
+            appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
+            appstr buf "%s:" id ;
+            appstr buf ".ascii \"%s\"" (escape_string str) ;
+            if space <> 0 then appstr buf ".space %d" space ;
+            appstr buf ".byte %d\n" space
+        | _ -> failwith "unexpected ast")
       strings ;
     appstr buf ".text\n" ;
     Buffer.contents buf

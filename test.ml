@@ -2,6 +2,8 @@ let id x = x
 
 let pi = 3
 
+let helloworld = "Hello, world!\n"
+
 ;;
 print_string "Test starts.\n"
 
