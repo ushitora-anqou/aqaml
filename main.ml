@@ -10,7 +10,9 @@ let read_lines () =
   in
   String.concat "\n" (List.rev (aux []))
 
-let appstr buf = ksprintf (fun str -> Buffer.add_string buf (str ^ "\n"))
+let appfmt buf = ksprintf (fun str -> Buffer.add_string buf (str ^ "\n"))
+
+let appstr buf str = Buffer.add_string buf (str ^ "\n")
 
 let escape_string str =
   let buf = Buffer.create (String.length str) in
@@ -876,20 +878,20 @@ let rec generate (letfuncs, strings) =
   in
   let strings_code =
     let buf = Buffer.create 80 in
-    appstr buf ".data" ;
+    appfmt buf ".data" ;
     List.iter
       (function
         | StringValue (id, str) ->
             let size = (String.length str / 8) + 1 in
             let space = 7 - (String.length str mod 8) in
-            appstr buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
-            appstr buf "%s:" id ;
-            appstr buf ".ascii \"%s\"" (escape_string str) ;
-            if space <> 0 then appstr buf ".space %d" space ;
-            appstr buf ".byte %d\n" space
+            appfmt buf ".quad %d" ((size lsl 10) lor (0 lsl 8) lor 252) ;
+            appfmt buf "%s:" id ;
+            appfmt buf ".ascii \"%s\"" (escape_string str) ;
+            if space <> 0 then appfmt buf ".space %d" space ;
+            appfmt buf ".byte %d\n" space
         | _ -> failwith "unexpected ast")
       strings ;
-    appstr buf ".text\n" ;
+    appfmt buf ".text\n" ;
     Buffer.contents buf
   in
   let letfuncs_code =
