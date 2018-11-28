@@ -448,3 +448,15 @@ test (if "abcdef" <> "abc" then 1 else 0) 1
 
 ;;
 test (if "abc" <> "abcdef" then 1 else 0) 1
+
+;;
+test (match 10 with 10 -> 12) 12
+
+;;
+test (match 10 with x -> x + 2) 12
+
+;;
+test
+  ( match [(1, 2); (3, 4); (5, 6)] with [(1, x); (3, y); (z, 6)] -> (x * y) - z
+  )
+  3

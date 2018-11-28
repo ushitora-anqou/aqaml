@@ -39,6 +39,8 @@ let make_id base =
   id_counter := !id_counter + 1 ;
   sprintf "%s.%d" base !id_counter
 
+let make_label () = make_id ".L"
+
 type token =
   | IntLiteral of int
   | StringLiteral of string * string
@@ -67,6 +69,9 @@ type token =
   | ColonColon
   | Semicolon
   | SemicolonSemicolon
+  | Match
+  | With
+  | Arrow
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -96,6 +101,9 @@ let string_of_token = function
   | ColonColon -> "::"
   | Semicolon -> ";"
   | SemicolonSemicolon -> ";;"
+  | Match -> "match"
+  | With -> "with"
+  | Arrow -> "->"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -188,10 +196,14 @@ let tokenize program =
           | "if" -> If
           | "then" -> Then
           | "else" -> Else
+          | "match" -> Match
+          | "with" -> With
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
-      | '-' -> Minus :: aux i
+      | '-' -> (
+          let i, ch = next_char i in
+          match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
       | '*' -> Star :: aux i
       | '/' -> Slash :: aux i
       | '(' -> (
@@ -251,6 +263,7 @@ type ast =
   | Cons of (ast * ast)
   | EmptyList
   | ExprSeq of ast list
+  | MatchWith of ast * (pattern * ast) list
 
 and pattern = ast * string list
 
@@ -398,6 +411,18 @@ let parse tokens =
         | _ -> raise Unexpected_token )
     | tokens -> parse_tuple tokens
   and parse_let = function
+    | Match :: tokens -> (
+        let tokens, cond = parse_expression tokens in
+        match tokens with
+        | With :: tokens -> (
+            let tokens, ptn = parse_pattern tokens in
+            match tokens with
+            | Arrow :: tokens ->
+                let tokens, case = parse_expression tokens in
+                ( tokens
+                , MatchWith (cond, [((ptn, varnames_in_pattern ptn), case)]) )
+            | _ -> raise Unexpected_token )
+        | _ -> raise Unexpected_token )
     | Let :: tokens -> (
         let tokens, recursive =
           match tokens with
@@ -572,6 +597,21 @@ let analyze asts =
         in
         letfuncs := ast :: !letfuncs ;
         ast
+    | MatchWith (cond, cases) ->
+        MatchWith
+          ( aux env cond
+          , List.map
+              (fun (((_, varnames) as ptn), ast) ->
+                let rec add_symbols symbols = function
+                  | varname :: varnames ->
+                      add_symbols
+                        (HashMap.add varname (Var varname) symbols)
+                        varnames
+                  | [] -> symbols
+                in
+                let env' = {symbols= add_symbols env.symbols varnames} in
+                (ptn, aux env' ast) )
+              cases )
     | _ -> failwith "unexpected ast"
   in
   Hashtbl.add toplevel "String.length" (Var "String.length") ;
@@ -656,7 +696,7 @@ let rec generate (letfuncs, strings) =
       ; sprintf "mov rdx, %d" tag
       ; "call aqaml_alloc_block@PLT" ]
   in
-  let rec gen_assign_pattern env = function
+  let rec gen_assign_pattern env exit_label = function
     | IntValue _ | UnitValue | StringValue _ | EmptyList -> "pop rax"
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
@@ -666,8 +706,8 @@ let rec generate (letfuncs, strings) =
           [ "pop rax"
           ; "push QWORD PTR [rax]"
           ; "push QWORD PTR [rax + 8]"
-          ; gen_assign_pattern env cdr
-          ; gen_assign_pattern env car ]
+          ; gen_assign_pattern env exit_label cdr
+          ; gen_assign_pattern env exit_label car ]
     | TupleValue values ->
         String.concat "\n"
           [ "pop rax"
@@ -676,8 +716,23 @@ let rec generate (letfuncs, strings) =
                  (fun i _ -> sprintf "push QWORD PTR [rax + %d]" (i * 8))
                  values)
           ; String.concat "\n"
-              (List.map (gen_assign_pattern env) (List.rev values)) ]
+              (List.map (gen_assign_pattern env exit_label) (List.rev values))
+          ]
     | _ -> failwith "unexpected ast"
+  in
+  let rec gen_assign_pattern_or_throw env ptn =
+    let exp_label = make_label () in
+    let exit_label = make_label () in
+    let assign_code = gen_assign_pattern env exp_label ptn in
+    let buf = Buffer.create 256 in
+    appstr buf assign_code ;
+    appfmt buf "jmp %s" exit_label ;
+    appfmt buf "%s:" exp_label ;
+    appstr buf "mov rax, 1" ;
+    appstr buf "call exit@PLT" ;
+    (* TODO: throw *)
+    appfmt buf "%s:" exit_label ;
+    Buffer.contents buf
   in
   let stack_size = ref 0 in
   let rec aux env = function
@@ -793,8 +848,8 @@ let rec generate (letfuncs, strings) =
           ; tag_int "rax"
           ; "push rax" ]
     | IfThenElse (cond, then_body, else_body) ->
-        let false_label = make_id ".L" in
-        let exit_label = make_id ".L" in
+        let false_label = make_label () in
+        let exit_label = make_label () in
         String.concat "\n"
           [ aux env cond
           ; "pop rax"
@@ -857,8 +912,11 @@ let rec generate (letfuncs, strings) =
                in
                aux 1 env.varoffset varnames) }
         in
-        let assign_code = gen_assign_pattern env' bind in
-        String.concat "\n" [aux env lhs; assign_code; aux env' rhs]
+        let buf = Buffer.create 256 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ gen_assign_pattern_or_throw env' bind ;
+        appstr buf @@ aux env' rhs ;
+        Buffer.contents buf
     | LetFunc (_, funcname, _, _, Some body) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
@@ -869,6 +927,48 @@ let rec generate (letfuncs, strings) =
           [ sprintf "lea rax, [rip + %s]" funcname
           ; sprintf "mov [rbp + %d], rax" offset
           ; aux env body ]
+    | MatchWith (cond, cases) ->
+        let buf = Buffer.create 256 in
+        appstr buf "/* MatchWith BEGIN */" ;
+        appstr buf @@ aux env cond ;
+        let exit_label = make_label () in
+        let exp_label =
+          List.fold_left
+            (fun next_label ((ptn, varnames), case) ->
+              let offset = env.offset - (List.length varnames * 8) in
+              stack_size := max !stack_size (-offset) ;
+              let env =
+                { offset
+                ; varoffset=
+                    (let rec aux i varoffset = function
+                       | varname :: varnames ->
+                           aux (i + 1)
+                             (HashMap.add varname
+                                (env.offset - (i * 8))
+                                varoffset)
+                             varnames
+                       | [] -> varoffset
+                     in
+                     aux 1 env.varoffset varnames) }
+              in
+              appfmt buf "%s:" next_label ;
+              appstr buf "pop rax" ;
+              appstr buf "push rax" ;
+              appstr buf "push rax" ;
+              appstr buf @@ gen_assign_pattern env next_label ptn ;
+              appstr buf "pop rax" ;
+              appstr buf @@ aux env case ;
+              appfmt buf "jmp %s" exit_label ;
+              make_label () )
+            (make_label ()) cases
+        in
+        appfmt buf "%s:" exp_label ;
+        appstr buf "/* Match_failure */" ;
+        appstr buf "mov rax, 1" ;
+        appstr buf "call exit@PLT" ;
+        appfmt buf "%s:" exit_label ;
+        appstr buf "/* MatchWith END */" ;
+        Buffer.contents buf
     | _ -> failwith "unexpected ast"
   in
   let strings_code =
@@ -933,7 +1033,7 @@ let rec generate (letfuncs, strings) =
                            args))
                  ; String.concat "\n"
                      (List.map
-                        (fun (ptn, _) -> gen_assign_pattern env ptn)
+                        (fun (ptn, _) -> gen_assign_pattern_or_throw env ptn)
                         args)
                  ; ( if recursive then
                      sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
