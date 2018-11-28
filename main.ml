@@ -72,6 +72,7 @@ type token =
   | Match
   | With
   | Arrow
+  | Bar
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -104,6 +105,7 @@ let string_of_token = function
   | Match -> "match"
   | With -> "with"
   | Arrow -> "->"
+  | Bar -> "|"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -185,7 +187,7 @@ let tokenize program =
       | '"' ->
           let i, str = next_string_literal i in
           StringLiteral (make_id "string", str) :: aux i
-      | 'a' .. 'z' | 'A' .. 'Z' ->
+      | 'a' .. 'z' | 'A' .. 'Z' | '_' ->
           let i, str = next_ident (i - 1) in
           ( match str with
           | "let" -> Let
@@ -201,32 +203,25 @@ let tokenize program =
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
-      | '-' -> (
-          let i, ch = next_char i in
-          match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
       | '*' -> Star :: aux i
       | '/' -> Slash :: aux i
-      | '(' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '*' ->
-              let i = skip_comment i in
-              aux i
-          | ')' -> LRParen :: aux i
-          | _ -> LParen :: aux (i - 1) )
       | ')' -> RParen :: aux i
-      | '<' -> (
-          let i, ch = next_char i in
-          match ch with '>' -> LTGT :: aux i | _ -> LT :: aux (i - 1) )
       | '>' -> GT :: aux i
       | '=' -> Equal :: aux i
       | ',' -> Comma :: aux i
+      | ']' -> RBracket :: aux i
+      | '|' -> Bar :: aux i
+      | '-' -> (
+          let i, ch = next_char i in
+          match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
+      | '<' -> (
+          let i, ch = next_char i in
+          match ch with '>' -> LTGT :: aux i | _ -> LT :: aux (i - 1) )
       | '[' -> (
           let i, ch = next_char i in
           match ch with
           | ']' -> LRBracket :: aux i
           | _ -> LBracket :: aux (i - 1) )
-      | ']' -> RBracket :: aux i
       | ':' -> (
           let i, ch = next_char i in
           match ch with
@@ -237,6 +232,14 @@ let tokenize program =
           match ch with
           | ';' -> SemicolonSemicolon :: aux i
           | _ -> Semicolon :: aux (i - 1) )
+      | '(' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '*' ->
+              let i = skip_comment i in
+              aux i
+          | ')' -> LRParen :: aux i
+          | _ -> LParen :: aux (i - 1) )
       | _ -> failwith (sprintf "unexpected char: '%c'" ch)
     with EOF -> []
   in
@@ -414,13 +417,27 @@ let parse tokens =
     | Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
-        | With :: tokens -> (
+        | With :: Bar :: tokens | With :: tokens -> (
             let tokens, ptn = parse_pattern tokens in
             match tokens with
             | Arrow :: tokens ->
+                let rec aux = function
+                  | Bar :: tokens -> (
+                      let tokens, ptn = parse_pattern tokens in
+                      match tokens with
+                      | Arrow :: tokens ->
+                          let tokens, case = parse_expression tokens in
+                          let tokens, cases = aux tokens in
+                          ( tokens
+                          , ((ptn, varnames_in_pattern ptn), case) :: cases )
+                      | _ -> raise Unexpected_token )
+                  | tokens -> (tokens, [])
+                in
                 let tokens, case = parse_expression tokens in
+                let tokens, cases = aux tokens in
                 ( tokens
-                , MatchWith (cond, [((ptn, varnames_in_pattern ptn), case)]) )
+                , MatchWith
+                    (cond, ((ptn, varnames_in_pattern ptn), case) :: cases) )
             | _ -> raise Unexpected_token )
         | _ -> raise Unexpected_token )
     | Let :: tokens -> (
@@ -716,6 +733,8 @@ let rec generate (letfuncs, strings) =
     | Cons (car, cdr) ->
         String.concat "\n"
           [ "pop rax"
+          ; "cmp rax, 1"
+          ; "je " ^ exp_label
           ; "push QWORD PTR [rax]"
           ; "push QWORD PTR [rax + 8]"
           ; gen_assign_pattern env exp_label cdr
@@ -740,7 +759,7 @@ let rec generate (letfuncs, strings) =
     appstr buf assign_code ;
     appfmt buf "jmp %s" exit_label ;
     appfmt buf "%s:" exp_label ;
-    appstr buf "mov rax, 1" ;
+    appstr buf "mov rdi, 1" ;
     appstr buf "call exit@PLT" ;
     (* TODO: raise *)
     appfmt buf "%s:" exit_label ;
@@ -933,10 +952,14 @@ let rec generate (letfuncs, strings) =
         let buf = Buffer.create 256 in
         appstr buf "/* MatchWith BEGIN */" ;
         appstr buf @@ aux env cond ;
+        let saved_rsp_offset = env.offset - 8 in
+        stack_size := max !stack_size (-saved_rsp_offset) ;
+        let env = {env with offset= saved_rsp_offset} in
+        appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
         let exit_label = make_label () in
         let exp_label =
           List.fold_left
-            (fun next_label ((ptn, varnames), case) ->
+            (fun this_label ((ptn, varnames), case) ->
               let offset = env.offset - (List.length varnames * 8) in
               stack_size := max !stack_size (-offset) ;
               let env =
@@ -953,20 +976,22 @@ let rec generate (letfuncs, strings) =
                      in
                      aux 1 env.varoffset varnames) }
               in
-              appfmt buf "%s:" next_label ;
+              let next_label = make_label () in
+              appfmt buf "%s:" this_label ;
+              appfmt buf "mov rsp, [rbp + %d]" saved_rsp_offset ;
               appstr buf "pop rax" ;
               appstr buf "push rax" ;
               appstr buf "push rax" ;
               appstr buf @@ gen_assign_pattern env next_label ptn ;
               appstr buf "pop rax" ;
               appstr buf @@ aux env case ;
-              appfmt buf "jmp %s" exit_label ;
-              make_label () )
+              appfmt buf "jmp %s /* exit label */" exit_label ;
+              next_label )
             (make_label ()) cases
         in
         appfmt buf "%s:" exp_label ;
         appstr buf "/* Match_failure */" ;
-        appstr buf "mov rax, 1" ;
+        appstr buf "mov rdi, 1" ;
         appstr buf "call exit@PLT" ;
         appfmt buf "%s:" exit_label ;
         appstr buf "/* MatchWith END */" ;
@@ -1097,7 +1122,7 @@ let rec generate (letfuncs, strings) =
     appfmt buf "mov rax, %d" @@ tagged_int 0 ;
     appstr buf "call aqaml_main" ;
     appstr buf "mov rax, 0" ;
-    appstr buf "ret\n\n" ;
+    appstr buf "ret\n" ;
     Buffer.contents buf
   in
   main_code ^ letfuncs_code ^ strings_code
