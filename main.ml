@@ -888,27 +888,17 @@ let rec generate (letfuncs, strings) =
       with Not_found -> failwith (sprintf "not found in analysis: %s" varname)
       )
     | FuncCall (func, args) ->
-        String.concat "\n"
-          [ aux env func
-          ; String.concat "\n" (List.map (aux env) (List.rev args))
-          ; String.concat "\n"
-              (List.map
-                 (fun (_, reg) -> "pop " ^ reg)
-                 (List.filter
-                    (fun (index, reg) -> index < List.length args)
-                    [ (0, "rax")
-                    ; (1, "rbx")
-                    ; (2, "rdi")
-                    ; (3, "rsi")
-                    ; (4, "rdx")
-                    ; (5, "rcx")
-                    ; (6, "r8")
-                    ; (7, "r9")
-                    ; (8, "r12")
-                    ; (9, "r13") ]))
-          ; "pop r10"
-          ; "call r10"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env func ;
+        List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
+        List.iteri
+          (fun index reg ->
+            if index < List.length args then appfmt buf "pop %s" reg )
+          ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
+        appstr buf "pop r10" ;
+        appstr buf "call r10" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | LetVar ((bind, varnames), lhs, Some rhs) ->
         let offset = env.offset - (List.length varnames * 8) in
         stack_size := max !stack_size (-offset) ;
@@ -1060,51 +1050,55 @@ let rec generate (letfuncs, strings) =
          letfuncs)
   in
   let main_code =
-    String.concat "\n"
-      [ "aqaml_malloc:"
-      ; untag_int "rax"
-      ; "mov edi, eax"
-      ; "call aqaml_malloc_detail@PLT"
-      ; "ret"
-      ; ""
-      ; "aqaml_structural_equal:"
-      ; "mov rdi, rax"
-      ; "mov rsi, rbx"
-      ; "call aqaml_structural_equal_detail@PLT"
-      ; tag_int "rax"
-      ; "ret"
-      ; ""
-      ; "aqaml_structural_inequal:"
-      ; "mov rdi, rax"
-      ; "mov rsi, rbx"
-      ; "call aqaml_structural_equal_detail@PLT"
-      ; "test eax, eax" (* eax == 0 *)
-      ; "sete al"
-      ; tag_int "rax"
-      ; "ret"
-      ; ""
-      ; "aqaml_string_length:"
-      ; "mov rdi, rax"
-      ; "call aqaml_string_length_detail@PLT"
-      ; tag_int "rax"
-      ; "ret"
-      ; ""
-      ; "aqaml_print_string:"
-      ; "mov rdi, rax"
-      ; "call aqaml_print_string_detail@PLT"
-      ; "mov rax, 1" (* return unit value *)
-      ; "ret"
-      ; ""
-      ; "aqaml_exit:"
-      ; "mov rdi, rax"
-      ; "shr rdi, 1"
-      ; "call exit@PLT"
-      ; ""
-      ; "main:"
-      ; "mov rax, 1"
-      ; "call aqaml_main"
-      ; "mov rax, 0"
-      ; "ret\n\n" ]
+    let buf = Buffer.create 512 in
+    appstr buf "aqaml_malloc:" ;
+    appstr buf @@ untag_int "rax" ;
+    appstr buf "mov edi, eax" ;
+    appstr buf "call aqaml_malloc_detail@PLT" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_structural_equal:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "call aqaml_structural_equal_detail@PLT" ;
+    appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_structural_inequal:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "call aqaml_structural_equal_detail@PLT" ;
+    (* eax == 0 *)
+    appstr buf "test eax, eax" ;
+    appstr buf "sete al" ;
+    appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_string_length:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_string_length_detail@PLT" ;
+    appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_print_string:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_print_string_detail@PLT" ;
+    (* return unit value *)
+    appstr buf "mov rax, 1" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_exit:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "shr rdi, 1" ;
+    appstr buf "call exit@PLT" ;
+    appstr buf "" ;
+    appstr buf "main:" ;
+    (* give unit value as an argument *)
+    appfmt buf "mov rax, %d" @@ tagged_int 0 ;
+    appstr buf "call aqaml_main" ;
+    appstr buf "mov rax, 0" ;
+    appstr buf "ret\n\n" ;
+    Buffer.contents buf
   in
   main_code ^ letfuncs_code ^ strings_code
 
