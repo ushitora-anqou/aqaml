@@ -7,7 +7,7 @@ let helloworld = "Hello, world!\n"
 ;;
 print_string "Test starts.\n"
 
-let test got expect = if got <> expect then ( print_string "ERROR" ; exit 1 )
+let test got expect = if got <> expect then ( print_string "ERROR\n" ; exit 1 )
 
 ;;
 test 42 42
@@ -424,3 +424,27 @@ test (id 10) 10
 
 ;;
 test pi 3
+
+;;
+test (if "abc" = "abc" then 1 else 0) 1
+
+;;
+test (if "abc" = "def" then 1 else 0) 0
+
+;;
+test (if "abcdef" = "abc" then 1 else 0) 0
+
+;;
+test (if "abc" = "abcdef" then 1 else 0) 0
+
+;;
+test (if "abc" <> "abc" then 1 else 0) 0
+
+;;
+test (if "abc" <> "def" then 1 else 0) 1
+
+;;
+test (if "abcdef" <> "abc" then 1 else 0) 1
+
+;;
+test (if "abc" <> "abcdef" then 1 else 0) 1

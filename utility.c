@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct AQamlValue {
     enum {
@@ -25,6 +26,8 @@ typedef struct AQamlValue {
         } * string;
     };
 } AQamlValue;
+
+unsigned long aqaml_string_length_detail(unsigned long ptr);
 
 void *aqaml_malloc_detail(unsigned int size)
 {
@@ -68,6 +71,13 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs_src,
                           rhs_src = rhs.array->data[i];
             if (aqaml_structural_equal_detail(lhs_src, rhs_src) == 0) return 0;
         }
+    } break;
+
+    case AQAML_STRING: {
+        unsigned long lhs_size = aqaml_string_length_detail(lhs_src),
+                      rhs_size = aqaml_string_length_detail(rhs_src);
+        if (lhs_size != rhs_size) return 0;
+        return memcmp(lhs.string->str, rhs.string->str, lhs_size) == 0;
     } break;
 
     default:
