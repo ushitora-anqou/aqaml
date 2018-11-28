@@ -624,12 +624,7 @@ let analyze asts =
     aux' [] asts
   in
   let ast =
-    LetFunc
-      ( false
-      , "aqaml_main"
-      , [(Var "aqaml_main_dummy", ["aqaml_main_dummy"])]
-      , ast
-      , Some (IntValue 0) )
+    LetFunc (false, "aqaml_main", [(UnitValue, [])], ast, Some UnitValue)
   in
   letfuncs := ast :: !letfuncs ;
   (!letfuncs, !strings)
