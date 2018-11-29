@@ -73,6 +73,7 @@ type token =
   | With
   | Arrow
   | Bar
+  | Fun
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -106,6 +107,7 @@ let string_of_token = function
   | With -> "with"
   | Arrow -> "->"
   | Bar -> "|"
+  | Fun -> "fun"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -200,6 +202,7 @@ let tokenize program =
           | "else" -> Else
           | "match" -> Match
           | "with" -> With
+          | "fun" -> Fun
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -414,6 +417,18 @@ let parse tokens =
         | _ -> raise Unexpected_token )
     | tokens -> parse_tuple tokens
   and parse_let = function
+    | Fun :: tokens ->
+        let funcname = ".fun" in
+        let rec aux = function
+          | Arrow :: tokens -> (tokens, [])
+          | tokens ->
+              let tokens, arg = parse_pattern tokens in
+              let tokens, args = aux tokens in
+              (tokens, (arg, varnames_in_pattern arg) :: args)
+        in
+        let tokens, args = aux tokens in
+        let tokens, func = parse_expression tokens in
+        (tokens, LetFunc (false, funcname, args, func, Some (Var funcname)))
     | Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with

@@ -498,3 +498,12 @@ in
 test (f 10 10) 100 ;
 test (f 10 20) 21 ;
 test (f 15 3) 30
+
+;;
+let rec fold_left f a bs =
+  match bs with b :: bs -> fold_left f (f a b) bs | _ -> a
+in
+test (fold_left (fun a b -> (a - b) * 2) 100 [1; 2; 3]) 778 ;
+test
+  (fold_left (fun a (b, c) -> b :: c :: a) [] [(1, 2); (2, 3); (4, 5)])
+  [4; 5; 2; 3; 1; 2]
