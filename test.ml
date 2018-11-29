@@ -490,3 +490,11 @@ in
 test (length [1; 2; 3]) 3 ;
 test (length [1]) 1 ;
 test (length []) 0
+
+;;
+let f x y =
+  match x with 10 -> ( match y with 10 -> 100 | _ -> y + 1 ) | _ -> x * 2
+in
+test (f 10 10) 100 ;
+test (f 10 20) 21 ;
+test (f 15 3) 30
