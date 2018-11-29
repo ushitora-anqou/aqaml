@@ -507,3 +507,7 @@ test (fold_left (fun a b -> (a - b) * 2) 100 [1; 2; 3]) 778 ;
 test
   (fold_left (fun a (b, c) -> b :: c :: a) [] [(1, 2); (2, 3); (4, 5)])
   [4; 5; 2; 3; 1; 2]
+
+;;
+test ((function 10 -> 12 | x -> x * 2) 3) 6 ;
+test ((function 10 -> 12 | x -> x * 2) 10) 12

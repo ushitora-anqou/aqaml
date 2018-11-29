@@ -74,6 +74,7 @@ type token =
   | Arrow
   | Bar
   | Fun
+  | Function
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -108,6 +109,7 @@ let string_of_token = function
   | Arrow -> "->"
   | Bar -> "|"
   | Fun -> "fun"
+  | Function -> "function"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -203,6 +205,7 @@ let tokenize program =
           | "match" -> Match
           | "with" -> With
           | "fun" -> Fun
+          | "function" -> Function
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -416,7 +419,38 @@ let parse tokens =
             | _ -> (tokens, IfThenElse (cond, then_body, None)) )
         | _ -> raise Unexpected_token )
     | tokens -> parse_tuple tokens
+  and parse_pattern_match = function
+    | Bar :: tokens | tokens -> (
+        let tokens, ptn = parse_pattern tokens in
+        match tokens with
+        | Arrow :: tokens ->
+            let rec aux = function
+              | Bar :: tokens -> (
+                  let tokens, ptn = parse_pattern tokens in
+                  match tokens with
+                  | Arrow :: tokens ->
+                      let tokens, case = parse_expression tokens in
+                      let tokens, cases = aux tokens in
+                      (tokens, ((ptn, varnames_in_pattern ptn), case) :: cases)
+                  | _ -> raise Unexpected_token )
+              | tokens -> (tokens, [])
+            in
+            let tokens, case = parse_expression tokens in
+            let tokens, cases = aux tokens in
+            (tokens, ((ptn, varnames_in_pattern ptn), case) :: cases)
+        | _ -> raise Unexpected_token )
   and parse_let = function
+    | Function :: tokens ->
+        let funcname = ".function" in
+        let argname = ".function.arg" in
+        let tokens, cases = parse_pattern_match tokens in
+        ( tokens
+        , LetFunc
+            ( false
+            , funcname
+            , [(Var argname, [argname])]
+            , MatchWith (Var argname, cases)
+            , Some (Var funcname) ) )
     | Fun :: tokens ->
         let funcname = ".fun" in
         let rec aux = function
@@ -432,28 +466,9 @@ let parse tokens =
     | Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
-        | With :: Bar :: tokens | With :: tokens -> (
-            let tokens, ptn = parse_pattern tokens in
-            match tokens with
-            | Arrow :: tokens ->
-                let rec aux = function
-                  | Bar :: tokens -> (
-                      let tokens, ptn = parse_pattern tokens in
-                      match tokens with
-                      | Arrow :: tokens ->
-                          let tokens, case = parse_expression tokens in
-                          let tokens, cases = aux tokens in
-                          ( tokens
-                          , ((ptn, varnames_in_pattern ptn), case) :: cases )
-                      | _ -> raise Unexpected_token )
-                  | tokens -> (tokens, [])
-                in
-                let tokens, case = parse_expression tokens in
-                let tokens, cases = aux tokens in
-                ( tokens
-                , MatchWith
-                    (cond, ((ptn, varnames_in_pattern ptn), case) :: cases) )
-            | _ -> raise Unexpected_token )
+        | With :: tokens ->
+            let tokens, cases = parse_pattern_match tokens in
+            (tokens, MatchWith (cond, cases))
         | _ -> raise Unexpected_token )
     | Let :: tokens -> (
         let tokens, recursive =
