@@ -481,3 +481,12 @@ test (f ([10; 20; 30], (1, 3))) 10 ;
 test (f ([20; 10; 30], (3, 2))) 7 ;
 test (f ([5; 4; 3], (2, 1))) 19 ;
 test (f ([], (4, 3))) 5
+
+;;
+let length xs =
+  let rec aux n xs = match xs with x :: xs -> aux (n + 1) xs | [] -> n in
+  aux 0 xs
+in
+test (length [1; 2; 3]) 3 ;
+test (length [1]) 1 ;
+test (length []) 0

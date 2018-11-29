@@ -492,7 +492,9 @@ let parse tokens =
   and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
+    | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
         let tokens, ast = parse_pattern tokens in
         match tokens with
