@@ -943,8 +943,16 @@ let rec generate (letfuncs, strings) =
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
     | FuncVar varname -> (
       try
+        (* When FuncVar is processed here, AppDir will not be applied to this FuncVar.
+         * Therefore the returned value should be closured in case
+         * AppCls is applied to this value. *)
         let offset = HashMap.find varname env.varoffset in
-        String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
+        let buf = Buffer.create 128 in
+        appstr buf @@ gen_alloc_block 1 0 247 ;
+        appfmt buf "mov rdi, [rbp + %d]" offset ;
+        appstr buf "mov [rax], rdi" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
       with Not_found ->
         failwith (sprintf "not found in generation: %s" varname) )
     | Var varname -> (
@@ -972,7 +980,7 @@ let rec generate (letfuncs, strings) =
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
         appstr buf "pop r10" ;
-        appstr buf "call r10" ;
+        appstr buf "call [r10]" ;
         appstr buf "push rax" ;
         Buffer.contents buf
     | LetVar ((bind, varnames), lhs, Some rhs) ->
