@@ -267,6 +267,7 @@ type ast =
   | IfThenElse of (ast * ast * ast option)
   | Var of string
   | FuncCall of (ast * ast list)
+  | FuncCallLabel of (string * ast list)
   | LetVar of (pattern * ast * ast option)
   | LetFunc of (bool * string * pattern list * ast * ast option)
   | Cons of (ast * ast)
@@ -611,6 +612,22 @@ let analyze asts =
       try HashMap.find name env.symbols with Not_found -> (
         try Hashtbl.find toplevel name with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) ) )
+    | FuncCall ((Var funcname as var), args) -> (
+      try
+        match
+          try HashMap.find funcname env.symbols with Not_found ->
+            Hashtbl.find toplevel funcname
+        with
+        | Var gen_funcname ->
+            let args = List.map (aux env) args in
+            if funcname = gen_funcname then
+              (* not funcname but variable name *)
+              (* TODO: this check works correctly? *)
+              FuncCall (aux env var, args)
+            else FuncCallLabel (gen_funcname, args)
+        | _ -> raise Not_found
+      with Not_found -> failwith (sprintf "not found in analysis: %s" funcname)
+      )
     | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
     | LetVar ((bind, varnames), lhs, Some rhs) ->
         let rec add_symbols symbols = function
@@ -663,9 +680,9 @@ let analyze asts =
               cases )
     | _ -> failwith "unexpected ast"
   in
-  Hashtbl.add toplevel "String.length" (Var "String.length") ;
-  Hashtbl.add toplevel "print_string" (Var "print_string") ;
-  Hashtbl.add toplevel "exit" (Var "exit") ;
+  Hashtbl.add toplevel "String.length" (Var "aqaml_string_length") ;
+  Hashtbl.add toplevel "print_string" (Var "aqaml_print_string") ;
+  Hashtbl.add toplevel "exit" (Var "aqaml_exit") ;
   let ast =
     (* Convert None in LetVar and LetFunc to Some when analyzing.
        * The argument 'pending' prevents too many ExprSeq. *)
@@ -926,18 +943,22 @@ let rec generate (letfuncs, strings) =
             | Some else_body -> aux env else_body )
           ; sprintf "%s:" exit_label ]
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
-    | Var name when name = "String.length" ->
-        String.concat "\n" ["lea rax, [rip + aqaml_string_length]"; "push rax"]
-    | Var name when name = "print_string" ->
-        String.concat "\n" ["lea rax, [rip + aqaml_print_string]"; "push rax"]
-    | Var name when name = "exit" ->
-        String.concat "\n" ["lea rax, [rip + aqaml_exit]"; "push rax"]
     | Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
-      with Not_found -> failwith (sprintf "not found in analysis: %s" varname)
-      )
+      with Not_found ->
+        failwith (sprintf "not found in generation: %s" varname) )
+    | FuncCallLabel (funcname, args) ->
+        let buf = Buffer.create 128 in
+        List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
+        List.iteri
+          (fun index reg ->
+            if index < List.length args then appfmt buf "pop %s" reg )
+          ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
+        appfmt buf "call %s" funcname ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | FuncCall (func, args) ->
         let buf = Buffer.create 128 in
         appstr buf @@ aux env func ;
