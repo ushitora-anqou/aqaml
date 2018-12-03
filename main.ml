@@ -266,6 +266,7 @@ type ast =
   | LessThanEqual of (ast * ast)
   | IfThenElse of (ast * ast * ast option)
   | Var of string
+  | FuncVar of string
   | FuncCall of (ast * ast list)
   | FuncCallLabel of (string * ast list)
   | LetVar of (pattern * ast * ast option)
@@ -608,7 +609,7 @@ let analyze asts =
     | IfThenElse (cond, then_body, None) ->
         IfThenElse (aux env cond, aux env then_body, None)
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
-    | Var name -> (
+    | FuncVar name | Var name -> (
       try HashMap.find name env.symbols with Not_found -> (
         try Hashtbl.find toplevel name with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) ) )
@@ -618,13 +619,10 @@ let analyze asts =
           try HashMap.find funcname env.symbols with Not_found ->
             Hashtbl.find toplevel funcname
         with
-        | Var gen_funcname ->
+        | FuncVar gen_funcname ->
             let args = List.map (aux env) args in
-            if funcname = gen_funcname then
-              (* not funcname but variable name *)
-              (* TODO: this check works correctly? *)
-              FuncCall (aux env var, args)
-            else FuncCallLabel (gen_funcname, args)
+            FuncCallLabel (gen_funcname, args)
+        | Var varname -> FuncCall (aux env var, args)
         | _ -> raise Not_found
       with Not_found -> failwith (sprintf "not found in analysis: %s" funcname)
       )
@@ -639,7 +637,7 @@ let analyze asts =
         LetVar ((bind, varnames), aux env lhs, Some (aux env' rhs))
     | LetFunc (recursive, funcname, args, func, Some body) ->
         let gen_funcname = make_id funcname in
-        let funcvar = Var gen_funcname in
+        let funcvar = FuncVar gen_funcname in
         let env' =
           { symbols=
               List.fold_left
@@ -680,9 +678,9 @@ let analyze asts =
               cases )
     | _ -> failwith "unexpected ast"
   in
-  Hashtbl.add toplevel "String.length" (Var "aqaml_string_length") ;
-  Hashtbl.add toplevel "print_string" (Var "aqaml_print_string") ;
-  Hashtbl.add toplevel "exit" (Var "aqaml_exit") ;
+  Hashtbl.add toplevel "String.length" (FuncVar "aqaml_string_length") ;
+  Hashtbl.add toplevel "print_string" (FuncVar "aqaml_print_string") ;
+  Hashtbl.add toplevel "exit" (FuncVar "aqaml_exit") ;
   let ast =
     (* Convert None in LetVar and LetFunc to Some when analyzing.
        * The argument 'pending' prevents too many ExprSeq. *)
@@ -700,7 +698,7 @@ let analyze asts =
                :: pending ))
       | LetFunc (recursive, funcname, args, func, None) :: asts ->
           let gen_funcname = make_id funcname in
-          let funcvar = Var gen_funcname in
+          let funcvar = FuncVar gen_funcname in
           let env =
             { symbols=
                 List.fold_left
@@ -776,6 +774,9 @@ let rec generate (letfuncs, strings) =
         appstr buf "/* pattern match IntValue END */" ;
         Buffer.contents buf
     | StringValue _ -> "pop rax" (* TODO: string pattern match *)
+    | FuncVar varname ->
+        let offset = HashMap.find varname env.varoffset in
+        String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -943,6 +944,12 @@ let rec generate (letfuncs, strings) =
             | Some else_body -> aux env else_body )
           ; sprintf "%s:" exit_label ]
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
+    | FuncVar varname -> (
+      try
+        let offset = HashMap.find varname env.varoffset in
+        String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
+      with Not_found ->
+        failwith (sprintf "not found in generation: %s" varname) )
     | Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
