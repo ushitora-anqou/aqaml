@@ -267,8 +267,8 @@ type ast =
   | IfThenElse of (ast * ast * ast option)
   | Var of string
   | FuncVar of string
-  | FuncCall of (ast * ast list)
-  | FuncCallLabel of (string * ast list)
+  | AppCls of (ast * ast list)
+  | AppDir of (string * ast list)
   | LetVar of (pattern * ast * ast option)
   | LetFunc of (bool * string * pattern list * ast * ast option)
   | Cons of (ast * ast)
@@ -335,7 +335,7 @@ let parse tokens =
     let tokens, func = parse_primary tokens in
     let tokens, args = aux tokens in
     if args = [] then (tokens, func) (* not function call *)
-    else (tokens, FuncCall (func, args))
+    else (tokens, AppCls (func, args))
   and parse_multiplicative tokens =
     let rec aux lhs tokens =
       match tokens with
@@ -613,7 +613,7 @@ let analyze asts =
       try HashMap.find name env.symbols with Not_found -> (
         try Hashtbl.find toplevel name with Not_found ->
           failwith (sprintf "not found in analysis: %s" name) ) )
-    | FuncCall ((Var funcname as var), args) -> (
+    | AppCls ((Var funcname as var), args) -> (
       try
         match
           try HashMap.find funcname env.symbols with Not_found ->
@@ -621,12 +621,12 @@ let analyze asts =
         with
         | FuncVar gen_funcname ->
             let args = List.map (aux env) args in
-            FuncCallLabel (gen_funcname, args)
-        | Var varname -> FuncCall (aux env var, args)
+            AppDir (gen_funcname, args)
+        | Var varname -> AppCls (aux env var, args)
         | _ -> raise Not_found
       with Not_found -> failwith (sprintf "not found in analysis: %s" funcname)
       )
-    | FuncCall (func, args) -> FuncCall (aux env func, List.map (aux env) args)
+    | AppCls (func, args) -> AppCls (aux env func, List.map (aux env) args)
     | LetVar ((bind, varnames), lhs, Some rhs) ->
         let rec add_symbols symbols = function
           | varname :: varnames ->
@@ -774,9 +774,6 @@ let rec generate (letfuncs, strings) =
         appstr buf "/* pattern match IntValue END */" ;
         Buffer.contents buf
     | StringValue _ -> "pop rax" (* TODO: string pattern match *)
-    | FuncVar varname ->
-        let offset = HashMap.find varname env.varoffset in
-        String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
@@ -956,7 +953,7 @@ let rec generate (letfuncs, strings) =
         String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
       with Not_found ->
         failwith (sprintf "not found in generation: %s" varname) )
-    | FuncCallLabel (funcname, args) ->
+    | AppDir (funcname, args) ->
         let buf = Buffer.create 128 in
         List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
         List.iteri
@@ -966,7 +963,7 @@ let rec generate (letfuncs, strings) =
         appfmt buf "call %s" funcname ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | FuncCall (func, args) ->
+    | AppCls (func, args) ->
         let buf = Buffer.create 128 in
         appstr buf @@ aux env func ;
         List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
