@@ -604,6 +604,20 @@ let analyze asts =
   let letfuncs = ref [] in
   let strings = ref [] in
   let toplevel = Hashtbl.create 16 in
+  let rec aux_ptn env ptn =
+    match ptn with
+    | IntValue _ | UnitValue | EmptyList -> ptn
+    | StringValue _ ->
+        strings := ptn :: !strings ;
+        ptn
+    | TupleValue values -> TupleValue (List.map (aux_ptn env) values)
+    | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
+    | Var name -> (
+      try HashMap.find name env.symbols with Not_found -> (
+        try Hashtbl.find toplevel name with Not_found ->
+          failwith (sprintf "not found in analysis: %s" name) ) )
+    | _ -> failwith "unexpected pattern"
+  in
   let rec aux env ast =
     match ast with
     | IntValue _ | UnitValue | EmptyList -> ast
@@ -645,7 +659,7 @@ let analyze asts =
     | AppCls (func, args) -> AppCls (aux env func, List.map (aux env) args)
     | LetVar (bind, lhs, Some rhs) ->
         let env' = {symbols= add_symbols_in_pattern env.symbols bind} in
-        LetVar (bind, aux env lhs, Some (aux env' rhs))
+        LetVar (aux_ptn env' bind, aux env lhs, Some (aux env' rhs))
     | LetFunc (recursive, funcname, args, func, Some body) ->
         let gen_funcname = make_id funcname in
         let funcvar = FuncVar gen_funcname in
@@ -657,9 +671,14 @@ let analyze asts =
               else env'.symbols ) }
         in
         let func = aux env' func in
-        let env' = {symbols= HashMap.add funcname funcvar env.symbols} in
+        let env'' = {symbols= HashMap.add funcname funcvar env.symbols} in
         let ast =
-          LetFunc (recursive, gen_funcname, args, func, Some (aux env' body))
+          LetFunc
+            ( recursive
+            , gen_funcname
+            , List.map (aux_ptn env') args
+            , func
+            , Some (aux env'' body) )
         in
         letfuncs := ast :: !letfuncs ;
         ast
@@ -669,7 +688,7 @@ let analyze asts =
           , List.map
               (fun (ptn, ast) ->
                 let env' = {symbols= add_symbols_in_pattern env.symbols ptn} in
-                (ptn, aux env' ast) )
+                (aux env' ptn, aux env' ast) )
               cases )
     | _ -> failwith "unexpected ast"
   in
@@ -683,10 +702,10 @@ let analyze asts =
       | LetVar (bind, lhs, None) :: asts ->
           List.iter (fun varname -> Hashtbl.add toplevel varname (Var varname))
           @@ varnames_in_pattern bind ;
+          let env = {symbols= HashMap.empty} in
           ExprSeq
             (List.rev
-               ( LetVar
-                   (bind, aux {symbols= HashMap.empty} lhs, Some (aux' [] asts))
+               ( LetVar (aux env bind, aux env lhs, Some (aux' [] asts))
                :: pending ))
       | LetFunc (recursive, funcname, args, func, None) :: asts ->
           let gen_funcname = make_id funcname in
@@ -701,7 +720,12 @@ let analyze asts =
           let func = aux env func in
           Hashtbl.add toplevel funcname funcvar ;
           let ast =
-            LetFunc (recursive, gen_funcname, args, func, Some (aux' [] asts))
+            LetFunc
+              ( recursive
+              , gen_funcname
+              , List.map (aux env) args
+              , func
+              , Some (aux' [] asts) )
           in
           letfuncs := ast :: !letfuncs ;
           ExprSeq (List.rev (ast :: pending))
