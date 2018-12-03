@@ -591,12 +591,12 @@ type environment = {symbols: ast HashMap.t}
 
 let add_symbols_in_pattern symbols ptn =
   integrate symbols @@ hashmap_of_list
-  @@ List.map (fun n -> (n, Var n))
+  @@ List.map (fun n -> (n, Var (make_id n)))
   @@ varnames_in_pattern ptn
 
 let add_symbols_in_patterns symbols ptns =
   integrate symbols @@ hashmap_of_list
-  @@ List.map (fun n -> (n, Var n))
+  @@ List.map (fun n -> (n, Var (make_id n)))
   @@ List.flatten
   @@ List.map varnames_in_pattern ptns
 
@@ -652,7 +652,7 @@ let analyze asts =
         | FuncVar gen_funcname ->
             let args = List.map (aux env) args in
             AppDir (gen_funcname, args)
-        | Var varname -> AppCls (aux env var, args)
+        | Var varname -> AppCls (aux env var, List.map (aux env) args)
         | _ -> raise Not_found
       with Not_found -> failwith (sprintf "not found in analysis: %s" funcname)
       )
@@ -688,7 +688,7 @@ let analyze asts =
           , List.map
               (fun (ptn, ast) ->
                 let env' = {symbols= add_symbols_in_pattern env.symbols ptn} in
-                (aux env' ptn, aux env' ast) )
+                (aux_ptn env' ptn, aux env' ast) )
               cases )
     | _ -> failwith "unexpected ast"
   in
@@ -959,13 +959,13 @@ let rec generate (letfuncs, strings) =
         appstr buf "push rax" ;
         Buffer.contents buf
       with Not_found ->
-        failwith (sprintf "not found in generation: %s" varname) )
+        failwith (sprintf "not found in code generation: %s" varname) )
     | Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
       with Not_found ->
-        failwith (sprintf "not found in generation: %s" varname) )
+        failwith (sprintf "not found in code generation: %s" varname) )
     | AppDir (funcname, args) ->
         let buf = Buffer.create 128 in
         List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
