@@ -278,7 +278,8 @@ type ast =
   | AppCls of (ast * ast list)
   | AppDir of (string * ast list)
   | LetVar of (pattern * ast * ast option)
-  | LetFunc of (bool * string * pattern list * ast * ast option)
+  (* recursive?, funcname, args, function body, following body, free variables *)
+  | LetFunc of (bool * string * pattern list * ast * ast option * string list)
   | Cons of (ast * ast)
   | EmptyList
   | ExprSeq of ast list
@@ -460,7 +461,8 @@ let parse tokens =
             , funcname
             , [Var argname]
             , MatchWith (Var argname, cases)
-            , Some (Var funcname) ) )
+            , Some (Var funcname)
+            , [] ) )
     | Fun :: tokens ->
         let funcname = ".fun" in
         let rec aux = function
@@ -472,7 +474,7 @@ let parse tokens =
         in
         let tokens, args = aux tokens in
         let tokens, func = parse_expression tokens in
-        (tokens, LetFunc (false, funcname, args, func, Some (Var funcname)))
+        (tokens, LetFunc (false, funcname, args, func, Some (Var funcname), []))
     | Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
@@ -513,8 +515,9 @@ let parse tokens =
             match tokens with
             | In :: tokens ->
                 let tokens, body = parse_expression tokens in
-                (tokens, LetFunc (recursive, name, args, func, Some body))
-            | _ -> (tokens, LetFunc (recursive, name, args, func, None)) ) )
+                (tokens, LetFunc (recursive, name, args, func, Some body, []))
+            | _ -> (tokens, LetFunc (recursive, name, args, func, None, [])) )
+        )
     | tokens -> parse_if tokens
   and parse_expr_sequence tokens =
     let rec aux = function
@@ -660,25 +663,26 @@ let analyze asts =
     | LetVar (bind, lhs, Some rhs) ->
         let env' = {symbols= add_symbols_in_pattern env.symbols bind} in
         LetVar (aux_ptn env' bind, aux env lhs, Some (aux env' rhs))
-    | LetFunc (recursive, funcname, args, func, Some body) ->
+    | LetFunc (recursive, funcname, args, func, Some body, _) ->
         let gen_funcname = make_id funcname in
         let funcvar = FuncVar gen_funcname in
-        let env' = {symbols= add_symbols_in_patterns env.symbols args} in
+        let env_in = {symbols= add_symbols_in_patterns env.symbols args} in
         (* if recursive then funcname should be in env *)
-        let env' =
+        let env_in =
           { symbols=
-              ( if recursive then HashMap.add funcname funcvar env'.symbols
-              else env'.symbols ) }
+              ( if recursive then HashMap.add funcname funcvar env_in.symbols
+              else env_in.symbols ) }
         in
-        let func = aux env' func in
-        let env'' = {symbols= HashMap.add funcname funcvar env.symbols} in
+        let func = aux env_in func in
+        let env_out = {symbols= HashMap.add funcname funcvar env.symbols} in
         let ast =
           LetFunc
             ( recursive
             , gen_funcname
-            , List.map (aux_ptn env') args
+            , List.map (aux_ptn env_in) args
             , func
-            , Some (aux env'' body) )
+            , Some (aux env_out body)
+            , [] )
         in
         letfuncs := ast :: !letfuncs ;
         ast
@@ -707,7 +711,7 @@ let analyze asts =
             (List.rev
                ( LetVar (aux env bind, aux env lhs, Some (aux' [] asts))
                :: pending ))
-      | LetFunc (recursive, funcname, args, func, None) :: asts ->
+      | LetFunc (recursive, funcname, args, func, None, _) :: asts ->
           let gen_funcname = make_id funcname in
           let funcvar = FuncVar gen_funcname in
           let env = {symbols= add_symbols_in_patterns HashMap.empty args} in
@@ -725,7 +729,8 @@ let analyze asts =
               , gen_funcname
               , List.map (aux env) args
               , func
-              , Some (aux' [] asts) )
+              , Some (aux' [] asts)
+              , [] )
           in
           letfuncs := ast :: !letfuncs ;
           ExprSeq (List.rev (ast :: pending))
@@ -734,7 +739,9 @@ let analyze asts =
     in
     aux' [] asts
   in
-  let ast = LetFunc (false, "aqaml_main", [UnitValue], ast, Some UnitValue) in
+  let ast =
+    LetFunc (false, "aqaml_main", [UnitValue], ast, Some UnitValue, [])
+  in
   letfuncs := ast :: !letfuncs ;
   (!letfuncs, !strings)
 
@@ -1005,7 +1012,7 @@ let rec generate (letfuncs, strings) =
         appstr buf @@ gen_assign_pattern_or_raise env' bind ;
         appstr buf @@ aux env' rhs ;
         Buffer.contents buf
-    | LetFunc (_, funcname, _, _, Some body) ->
+    | LetFunc (_, funcname, _, _, Some body, _) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
         let env =
@@ -1088,7 +1095,7 @@ let rec generate (letfuncs, strings) =
     String.concat "\n"
       (List.map
          (function
-           | LetFunc (recursive, funcname, args, func, _) ->
+           | LetFunc (recursive, funcname, args, func, _, _) ->
                let varnames =
                  List.flatten @@ List.map varnames_in_pattern args
                in
