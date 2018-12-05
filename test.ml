@@ -511,3 +511,22 @@ test
 ;;
 test ((function 10 -> 12 | x -> x * 2) 3) 6 ;
 test ((function 10 -> 12 | x -> x * 2) 10) 12
+
+;;
+test
+  (let a = 3 in
+   let f () = a in
+   f ())
+  3
+
+let f () = pi
+
+;;
+test (f ()) 3
+
+;;
+test
+  ((let f x = x - 2 in
+    f)
+     10)
+  8

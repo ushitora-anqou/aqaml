@@ -286,6 +286,7 @@ type ast =
   | EmptyList
   | ExprSeq of ast list
   | MatchWith of ast * (pattern * ast) list
+  | MakeCls of string * string list
 
 and pattern = ast
 
@@ -662,7 +663,12 @@ let analyze asts =
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Var name -> (
       match find_symbol env name with
-      | 0, sym -> sym
+      | 0, (Var _ as sym) -> sym
+      | 0, FuncVar funcname ->
+          (* When FuncVar is processed here, AppDir will not be applied to this FuncVar.
+         * Therefore the returned value should be closured in case
+         * AppCls is applied to this value. *)
+          MakeCls (funcname, [])
       | _, (Var id as sym) ->
           env.freevars := (name, id) :: !(env.freevars) ;
           sym
@@ -702,6 +708,7 @@ let analyze asts =
           ; freevars= ref [] }
         in
         (* if recursive then funcname should be in env *)
+        (* TODO: assume recursive functions have no freevars *)
         let env_in =
           { env_in with
             symbols=
@@ -710,25 +717,46 @@ let analyze asts =
         in
         let func = aux env_in func in
         let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
+        (* freevars are passed to env if they are not defined in env *)
         List.iter
           (fun ((name, _) as var) ->
             let d, _ = find_symbol env name in
             if d <> 0 then env.freevars := var :: !(env.freevars) )
           !(env_in.freevars) ;
-        let env_out =
-          {env with symbols= HashMap.add funcname funcvar env.symbols}
-        in
-        let ast =
-          LetFunc
-            ( recursive
-            , gen_funcname
-            , List.map (aux_ptn env_in) args
-            , func
-            , Some (aux env_out body)
-            , freevars )
-        in
-        letfuncs := ast :: !letfuncs ;
-        ast
+        if List.length freevars = 0 then (
+          (* no freevars; no need for closure *)
+          let env_out =
+            {env with symbols= HashMap.add funcname funcvar env.symbols}
+          in
+          let ast =
+            LetFunc
+              ( recursive
+              , gen_funcname
+              , List.map (aux_ptn env_in) args
+              , func
+              , Some (aux env_out body)
+              , freevars )
+          in
+          letfuncs := ast :: !letfuncs ;
+          ast )
+        else
+          (* closure *)
+          let funcvar = Var gen_funcname in
+          let env_out =
+            {env with symbols= HashMap.add funcname funcvar env.symbols}
+          in
+          let ast =
+            LetFunc
+              ( recursive
+              , gen_funcname
+              , List.map (aux_ptn env_in) args
+              , func
+              , None
+              , freevars )
+          in
+          letfuncs := ast :: !letfuncs ;
+          LetVar
+            (funcvar, MakeCls (gen_funcname, freevars), Some (aux env_out body))
     | MatchWith (cond, cases) ->
         MatchWith
           ( aux env cond
@@ -777,17 +805,38 @@ let analyze asts =
           in
           let func = aux env func in
           let freevars = List.map (fun (_, a) -> a) !(env.freevars) in
-          Hashtbl.add toplevel funcname funcvar ;
           let ast =
-            LetFunc
-              ( recursive
-              , gen_funcname
-              , List.map (aux_ptn env) args
-              , func
-              , Some (aux' [] asts)
-              , freevars )
+            if List.length freevars = 0 then (
+              (* no freevars; no need for closure *)
+              Hashtbl.add toplevel funcname funcvar ;
+              let ast =
+                LetFunc
+                  ( recursive
+                  , gen_funcname
+                  , List.map (aux_ptn env) args
+                  , func
+                  , Some (aux' [] asts)
+                  , freevars )
+              in
+              letfuncs := ast :: !letfuncs ;
+              ast )
+            else
+              (* closure *)
+              let funcvar = Var gen_funcname in
+              Hashtbl.add toplevel funcname funcvar ;
+              let ast =
+                LetFunc
+                  ( recursive
+                  , gen_funcname
+                  , List.map (aux_ptn env) args
+                  , func
+                  , None
+                  , freevars )
+              in
+              letfuncs := ast :: !letfuncs ;
+              LetVar
+                (funcvar, MakeCls (gen_funcname, freevars), Some (aux' [] asts))
           in
-          letfuncs := ast :: !letfuncs ;
           ExprSeq (List.rev (ast :: pending))
       | ast :: asts -> aux' (aux toplevel_env ast :: pending) asts
       | [] -> ExprSeq (List.rev (UnitValue :: pending))
@@ -1008,20 +1057,6 @@ let rec generate (letfuncs, strings) =
             | Some else_body -> aux env else_body )
           ; sprintf "%s:" exit_label ]
     | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
-    | FuncVar varname -> (
-      try
-        (* When FuncVar is processed here, AppDir will not be applied to this FuncVar.
-         * Therefore the returned value should be closured in case
-         * AppCls is applied to this value. *)
-        let offset = HashMap.find varname env.varoffset in
-        let buf = Buffer.create 128 in
-        appstr buf @@ gen_alloc_block 1 0 247 ;
-        appfmt buf "mov rdi, [rbp + %d]" offset ;
-        appstr buf "mov [rax], rdi" ;
-        appstr buf "push rax" ;
-        Buffer.contents buf
-      with Not_found ->
-        failwith (sprintf "not found in code generation: %s" varname) )
     | Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
@@ -1047,6 +1082,7 @@ let rec generate (letfuncs, strings) =
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
         appstr buf "pop r10" ;
+        appfmt buf "lea %s, [r10 + 8]" @@ reg_of_index @@ List.length args ;
         appstr buf "call [r10]" ;
         appstr buf "push rax" ;
         Buffer.contents buf
@@ -1077,6 +1113,19 @@ let rec generate (letfuncs, strings) =
           [ sprintf "lea rax, [rip + %s]" funcname
           ; sprintf "mov [rbp + %d], rax" offset
           ; aux env body ]
+    | MakeCls (funcname, freevars) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ gen_alloc_block (List.length freevars + 1) 0 247 ;
+        appfmt buf "lea rdi, [rip + %s]" funcname ;
+        appstr buf "mov [rax], rdi" ;
+        List.iteri
+          (fun i var ->
+            let offset = HashMap.find var env.varoffset in
+            appfmt buf "mov rdi, [rbp + %d]" offset ;
+            appfmt buf "mov [rax + %d], rdi" ((i + 1) * 8) )
+          freevars ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | MatchWith (cond, cases) ->
         let buf = Buffer.create 256 in
         appstr buf "/* MatchWith BEGIN */" ;
@@ -1150,7 +1199,7 @@ let rec generate (letfuncs, strings) =
     String.concat "\n"
       (List.map
          (function
-           | LetFunc (recursive, funcname, args, func, _, _) ->
+           | LetFunc (recursive, funcname, args, func, _, freevars) ->
                let varnames =
                  List.flatten @@ List.map varnames_in_pattern args
                in
@@ -1169,34 +1218,56 @@ let rec generate (letfuncs, strings) =
                    ; varoffset= HashMap.add funcname offset env.varoffset }
                  else env
                in
+               (* if closured then freevars are stored on the stack *)
+               let env =
+                 { offset= env.offset - (8 * List.length freevars)
+                 ; varoffset=
+                     integrate env.varoffset @@ hashmap_of_list
+                     @@ List.mapi
+                          (fun i var -> (var, env.offset - (8 * (i + 1))))
+                          freevars }
+               in
                stack_size := -env.offset ;
                let code = aux env func in
-               String.concat "\n"
-                 [ sprintf "/* %s(%d) */"
-                     (if recursive then "recursive" else "")
-                     (List.length args)
-                 ; funcname ^ ":"
-                 ; "push rbp"
-                 ; "mov rbp, rsp"
-                 ; sprintf "sub rsp, %d" !stack_size
-                 ; String.concat "\n"
-                     (List.rev
-                        (List.mapi
-                           (fun i _ -> sprintf "push %s" (reg_of_index i))
-                           args))
-                 ; String.concat "\n"
-                     (List.map
-                        (fun ptn -> gen_assign_pattern_or_raise env ptn)
-                        args)
-                 ; ( if recursive then
-                     sprintf "lea rax, [rip + %s]\nmov [rbp + %d], rax"
-                       funcname env.offset
-                   else "nop" )
-                 ; code
-                 ; "pop rax"
-                 ; "mov rsp, rbp"
-                 ; "pop rbp"
-                 ; "ret\n\n" ]
+               let buf = Buffer.create 256 in
+               appfmt buf "/* %s(%d) */"
+                 (if recursive then "recursive" else "")
+                 (List.length args) ;
+               appstr buf @@ funcname ^ ":" ;
+               appstr buf @@ "push rbp" ;
+               appstr buf @@ "mov rbp, rsp" ;
+               appfmt buf "sub rsp, %d" !stack_size ;
+               (* push arguments in order *)
+               (* first the value for closure *)
+               if List.length freevars <> 0 then
+                 appfmt buf "push %s" @@ reg_of_index @@ List.length args ;
+               (* then real arguments *)
+               appstr buf @@ String.concat "\n" @@ List.rev
+               @@ List.mapi
+                    (fun i _ -> sprintf "push %s" (reg_of_index i))
+                    args ;
+               (* process real arguments *)
+               appstr buf @@ String.concat "\n"
+               @@ List.map
+                    (fun ptn -> gen_assign_pattern_or_raise env ptn)
+                    args ;
+               (* process for closure *)
+               List.iteri
+                 (fun i var ->
+                   appstr buf "pop rax" ;
+                   appfmt buf "mov rdi, [rax + %d]" (i * 8) ;
+                   appfmt buf "mov [rbp + %d], rdi"
+                   @@ HashMap.find var env.varoffset )
+                 freevars ;
+               if recursive then (
+                 appfmt buf "lea rax, [rip + %s]" funcname ;
+                 appfmt buf "mov [rbp + %d], rax" env.offset ) ;
+               appstr buf code ;
+               appstr buf "pop rax" ;
+               appstr buf "mov rsp, rbp" ;
+               appstr buf "pop rbp" ;
+               appstr buf "ret\n\n" ;
+               Buffer.contents buf
            | _ -> failwith "LetFunc should be here")
          letfuncs)
   in
