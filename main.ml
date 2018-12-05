@@ -2,6 +2,8 @@ open Printf
 open Scanf
 module HashMap = Map.Make (String)
 
+let string_of_list src = "[" ^ String.concat "; " src ^ "]"
+
 let hashmap_of_list src =
   let hashmap = ref HashMap.empty in
   List.iter (fun (k, v) -> hashmap := HashMap.add k v !hashmap) src ;
@@ -590,7 +592,10 @@ let parse tokens =
   in
   parse_expressions tokens
 
-type environment = {symbols: ast HashMap.t; parent: environment option}
+type environment =
+  { symbols: ast HashMap.t
+  ; parent: environment option
+  ; freevars: (string * string) list ref }
 
 let add_symbols_in_pattern symbols ptn =
   integrate symbols @@ hashmap_of_list
@@ -607,14 +612,18 @@ let analyze asts =
   let letfuncs = ref [] in
   let strings = ref [] in
   let toplevel = Hashtbl.create 16 in
-  let rec find_symbol maybe_env name =
-    match maybe_env with
-    | None -> (
-      try Hashtbl.find toplevel name with Not_found ->
-        failwith (sprintf "not found in analysis: %s" name) )
-    | Some env -> (
-      try HashMap.find name env.symbols with Not_found ->
-        find_symbol env.parent name )
+  let find_symbol env name =
+    let rec aux depth env =
+      try (depth, HashMap.find name env.symbols) with Not_found -> (
+        match env.parent with
+        | Some parent -> (* not toplevel *)
+                         aux (depth + 1) parent
+        | None -> (
+          try (* toplevel *)
+              (depth, Hashtbl.find toplevel name) with Not_found ->
+            failwith (sprintf "not found in analysis (find_symbol): %s" name) ) )
+    in
+    aux 0 env
   in
   let rec aux_ptn env ptn =
     match ptn with
@@ -624,7 +633,10 @@ let analyze asts =
         ptn
     | TupleValue values -> TupleValue (List.map (aux_ptn env) values)
     | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
-    | Var name -> find_symbol (Some env) name
+    | Var name -> (
+      match find_symbol env name with
+      | 0, sym -> sym
+      | _ -> failwith "[FATAL] variable not found in pattern analysis" )
     | _ -> failwith "unexpected pattern"
   in
   let rec aux env ast =
@@ -649,21 +661,32 @@ let analyze asts =
         IfThenElse (aux env cond, aux env then_body, None)
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Var name -> (
-      try HashMap.find name env.symbols with Not_found ->
-        find_symbol env.parent name )
+      match find_symbol env name with
+      | 0, sym -> sym
+      | _, (Var id as sym) ->
+          env.freevars := (name, id) :: !(env.freevars) ;
+          sym
+      | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
     | AppCls ((Var funcname as var), args) -> (
       try
         match
-          try HashMap.find funcname env.symbols with Not_found ->
-            find_symbol env.parent funcname
+          match find_symbol env funcname with
+          (* the symbol is 'safe' when it's in the same env
+           * or it can be called by its name *)
+          | 0, sym | _, (FuncVar _ as sym) -> sym
+          | _, (Var id as sym) ->
+              env.freevars := (funcname, id) :: !(env.freevars) ;
+              sym
+          | _ ->
+              failwith @@ sprintf "not found variable in analysis: %s" funcname
         with
         | FuncVar gen_funcname ->
             let args = List.map (aux env) args in
             AppDir (gen_funcname, args)
         | Var varname -> AppCls (aux env var, List.map (aux env) args)
         | _ -> raise Not_found
-      with Not_found -> failwith (sprintf "not found in analysis: %s" funcname)
-      )
+      with Not_found ->
+        failwith (sprintf "not found in analysis (AppCls): %s" funcname) )
     | AppCls (func, args) -> AppCls (aux env func, List.map (aux env) args)
     | LetVar (bind, lhs, Some rhs) ->
         let env' =
@@ -675,7 +698,8 @@ let analyze asts =
         let funcvar = FuncVar gen_funcname in
         let env_in =
           { symbols= add_symbols_in_patterns HashMap.empty args
-          ; parent= Some env }
+          ; parent= Some env
+          ; freevars= ref [] }
         in
         (* if recursive then funcname should be in env *)
         let env_in =
@@ -685,6 +709,12 @@ let analyze asts =
               else env_in.symbols ) }
         in
         let func = aux env_in func in
+        let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
+        List.iter
+          (fun ((name, _) as var) ->
+            let d, _ = find_symbol env name in
+            if d <> 0 then env.freevars := var :: !(env.freevars) )
+          !(env_in.freevars) ;
         let env_out =
           {env with symbols= HashMap.add funcname funcvar env.symbols}
         in
@@ -695,7 +725,7 @@ let analyze asts =
             , List.map (aux_ptn env_in) args
             , func
             , Some (aux env_out body)
-            , [] )
+            , freevars )
         in
         letfuncs := ast :: !letfuncs ;
         ast
@@ -717,11 +747,15 @@ let analyze asts =
   let ast =
     (* Convert None in LetVar and LetFunc to Some when analyzing.
        * The argument 'pending' prevents too many ExprSeq. *)
+    (* toplevel environment is in variable 'toplevel', so toplevel_env is empty. *)
+    let toplevel_env =
+      {symbols= HashMap.empty; parent= None; freevars= ref []}
+    in
     let rec aux' pending = function
       | LetVar (bind, lhs, None) :: asts ->
           List.iter (fun varname -> Hashtbl.add toplevel varname (Var varname))
           @@ varnames_in_pattern bind ;
-          let env = {symbols= HashMap.empty; parent= None} in
+          let env = toplevel_env in
           ExprSeq
             (List.rev
                ( LetVar (aux_ptn env bind, aux env lhs, Some (aux' [] asts))
@@ -730,7 +764,9 @@ let analyze asts =
           let gen_funcname = make_id funcname in
           let funcvar = FuncVar gen_funcname in
           let env =
-            {symbols= add_symbols_in_patterns HashMap.empty args; parent= None}
+            { symbols= add_symbols_in_patterns HashMap.empty args
+            ; parent= Some toplevel_env
+            ; freevars= ref [] }
           in
           (* if recursive then funcname should be in env *)
           let env =
@@ -740,6 +776,7 @@ let analyze asts =
                 else env.symbols ) }
           in
           let func = aux env func in
+          let freevars = List.map (fun (_, a) -> a) !(env.freevars) in
           Hashtbl.add toplevel funcname funcvar ;
           let ast =
             LetFunc
@@ -748,12 +785,11 @@ let analyze asts =
               , List.map (aux_ptn env) args
               , func
               , Some (aux' [] asts)
-              , [] )
+              , freevars )
           in
           letfuncs := ast :: !letfuncs ;
           ExprSeq (List.rev (ast :: pending))
-      | ast :: asts ->
-          aux' (aux {symbols= HashMap.empty; parent= None} ast :: pending) asts
+      | ast :: asts -> aux' (aux toplevel_env ast :: pending) asts
       | [] -> ExprSeq (List.rev (UnitValue :: pending))
     in
     aux' [] asts
