@@ -2,6 +2,8 @@ open Printf
 open Scanf
 module HashMap = Map.Make (String)
 
+let append_to_list_ref x xs = xs := x :: !xs
+
 let string_of_list src = "[" ^ String.concat "; " src ^ "]"
 
 let hashmap_of_list src =
@@ -617,9 +619,10 @@ let add_symbols_in_patterns symbols ptns =
   @@ List.flatten
   @@ List.map varnames_in_pattern ptns
 
+type type_toplevel = {letfuncs: ast list ref; strings: ast list ref}
+
 let analyze ast =
-  let letfuncs = ref [] in
-  let strings = ref [] in
+  let toplevel = {letfuncs= ref []; strings= ref []} in
   let find_symbol env name =
     let rec aux depth env =
       try (depth, HashMap.find name env.symbols) with Not_found -> (
@@ -634,7 +637,7 @@ let analyze ast =
     match ptn with
     | IntValue _ | UnitValue | EmptyList -> ptn
     | StringValue _ ->
-        strings := ptn :: !strings ;
+        append_to_list_ref ptn toplevel.strings ;
         ptn
     | TupleValue values -> TupleValue (List.map (aux_ptn env) values)
     | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
@@ -648,7 +651,7 @@ let analyze ast =
     match ast with
     | IntValue _ | UnitValue | EmptyList -> ast
     | StringValue _ ->
-        strings := ast :: !strings ;
+        append_to_list_ref ast toplevel.strings ;
         ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
@@ -741,7 +744,7 @@ let analyze ast =
               , aux env_out body
               , freevars )
           in
-          letfuncs := ast :: !letfuncs ;
+          append_to_list_ref ast toplevel.letfuncs ;
           ast )
         else
           (* closure *)
@@ -758,7 +761,7 @@ let analyze ast =
               , UnitValue
               , freevars )
           in
-          letfuncs := ast :: !letfuncs ;
+          append_to_list_ref ast toplevel.letfuncs ;
           LetVar (funcvar, MakeCls (gen_funcname, freevars), aux env_out body)
     | MatchWith (cond, cases) ->
         MatchWith
@@ -784,8 +787,8 @@ let analyze ast =
   let ast =
     LetFunc (false, "aqaml_main", [UnitValue], aux env ast, UnitValue, [])
   in
-  letfuncs := ast :: !letfuncs ;
-  (!letfuncs, !strings)
+  append_to_list_ref ast toplevel.letfuncs ;
+  (!(toplevel.letfuncs), !(toplevel.strings))
 
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
