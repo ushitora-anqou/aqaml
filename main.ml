@@ -707,23 +707,44 @@ let analyze ast =
         in
         LetVar (aux_ptn env' bind, aux env lhs, aux env' rhs)
     | LetFunc (recursive, funcname, args, func, body, _) ->
+        let toplevel_backup = toplevel in
         let gen_funcname = make_id funcname in
-        let funcvar = FuncVar gen_funcname in
-        let env_in =
-          { symbols= add_symbols_in_patterns HashMap.empty args
-          ; parent= Some env
-          ; freevars= ref [] }
+        (* when first run, assume that the function is not recursive,
+         * or recursive and has no freevars. Then funcvar is FuncVar.
+         * At the second time, funcvar is Var. *)
+        let rec analyze_func first =
+          let funcvar =
+            (* The function that is recursive and has freevars should be a closure. *)
+            if first then FuncVar gen_funcname else Var gen_funcname
+          in
+          let env_in =
+            { symbols= add_symbols_in_patterns HashMap.empty args
+            ; parent= Some env
+            ; freevars= ref [] }
+          in
+          (* if recursive then funcname should be in env *)
+          let env_in =
+            { env_in with
+              symbols=
+                ( if recursive then HashMap.add funcname funcvar env_in.symbols
+                else env_in.symbols ) }
+          in
+          let func = aux env_in func in
+          let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
+          if first && recursive && List.length freevars <> 0 then (
+            (* restore toplevel *)
+            (* TODO: is there any better way? *)
+            toplevel.letfuncs := !(toplevel_backup.letfuncs) ;
+            toplevel.strings := !(toplevel_backup.strings) ;
+            analyze_func false )
+          else if not first then
+            (* The function that is recursive and has freevars should be a closure. *)
+            ( env_in
+            , LetVar (funcvar, MakeCls (gen_funcname, freevars), func)
+            , freevars )
+          else (env_in, func, freevars)
         in
-        (* if recursive then funcname should be in env *)
-        (* TODO: assume recursive functions have no freevars *)
-        let env_in =
-          { env_in with
-            symbols=
-              ( if recursive then HashMap.add funcname funcvar env_in.symbols
-              else env_in.symbols ) }
-        in
-        let func = aux env_in func in
-        let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
+        let env_in, func, freevars = analyze_func true in
         (* freevars are passed to env if they are not defined in env *)
         List.iter
           (fun ((name, _) as var) ->
@@ -733,7 +754,9 @@ let analyze ast =
         if List.length freevars = 0 then (
           (* no freevars; no need for closure *)
           let env_out =
-            {env with symbols= HashMap.add funcname funcvar env.symbols}
+            { env with
+              symbols= HashMap.add funcname (FuncVar gen_funcname) env.symbols
+            }
           in
           let ast =
             LetFunc
@@ -1193,16 +1216,14 @@ let rec generate (letfuncs, strings) =
                     (fun ptn -> gen_assign_pattern_or_raise env ptn)
                     args ;
                (* process for closure *)
-               List.iteri
-                 (fun i var ->
-                   appstr buf "pop rax" ;
-                   appfmt buf "mov rdi, [rax + %d]" (i * 8) ;
-                   appfmt buf "mov [rbp + %d], rdi"
-                   @@ HashMap.find var env.varoffset )
-                 freevars ;
-               if recursive then (
-                 appfmt buf "lea rax, [rip + %s]" funcname ;
-                 appfmt buf "mov [rbp + %d], rax" env.offset ) ;
+               if List.length freevars > 0 then (
+                 appstr buf "pop rax" ;
+                 List.iteri
+                   (fun i var ->
+                     appfmt buf "mov rdi, [rax + %d]" (i * 8) ;
+                     appfmt buf "mov [rbp + %d], rdi"
+                     @@ HashMap.find var env.varoffset )
+                   freevars ) ;
                appstr buf code ;
                appstr buf "pop rax" ;
                appstr buf "mov rsp, rbp" ;

@@ -530,3 +530,41 @@ test
     f)
      10)
   8
+
+let rec f n = if n = 0 then 1 else f (n - 1) * pi
+
+;;
+test (f 3) 27
+
+let f () =
+  let rec g n = if n = 0 then 1 else g (n - 1) * pi in
+  g
+
+;;
+test ((f ()) 3) 27
+
+let rec f () =
+  let g () =
+    let pi, _ = f () in
+    pi
+  in
+  (pi, g)
+
+;;
+test
+  (let _, g = f () in
+   g ())
+  3
+
+let a = 10
+
+let b = 20
+
+let c = 30
+
+let g x y = (x * b) + c
+
+let f x y z = (a * x) + (b * y) + (c * z) + g y z
+
+;;
+test (f 2 3 4) 290
