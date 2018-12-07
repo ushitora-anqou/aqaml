@@ -568,3 +568,11 @@ let f x y z = (a * x) + (b * y) + (c * z) + g y z
 
 ;;
 test (f 2 3 4) 290
+
+;;
+let pos x = +x in
+let neg x = -x in
+test (pos 10) 10 ;
+test (pos (-10)) (-10) ;
+test (neg 10) (-10) ;
+test (neg (-10)) 10

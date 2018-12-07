@@ -272,6 +272,8 @@ type ast =
   | Sub of (ast * ast)
   | Mul of (ast * ast)
   | Div of (ast * ast)
+  | Negate of ast
+  | Positate of ast
   | StructEqual of (ast * ast)
   | StructInequal of (ast * ast)
   | LessThan of (ast * ast)
@@ -350,18 +352,26 @@ let parse tokens =
     let tokens, args = aux tokens in
     if args = [] then (tokens, func) (* not function call *)
     else (tokens, AppCls (func, args))
+  and parse_unary = function
+    | Minus :: tokens ->
+        let tokens, ast = parse_unary tokens in
+        (tokens, Negate ast)
+    | Plus :: tokens ->
+        let tokens, ast = parse_unary tokens in
+        (tokens, Positate ast)
+    | tokens -> parse_funccall tokens
   and parse_multiplicative tokens =
     let rec aux lhs tokens =
       match tokens with
       | Star :: tokens ->
-          let tokens, rhs = parse_funccall tokens in
+          let tokens, rhs = parse_unary tokens in
           aux (Mul (lhs, rhs)) tokens
       | Slash :: tokens ->
-          let tokens, rhs = parse_funccall tokens in
+          let tokens, rhs = parse_unary tokens in
           aux (Div (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_funccall tokens in
+    let tokens, ast = parse_unary tokens in
     aux ast tokens
   and parse_additive tokens =
     let rec aux lhs tokens =
@@ -659,6 +669,8 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
+    | Negate ast -> Negate (aux env ast)
+    | Positate ast -> Positate (aux env ast)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
     | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
     | LessThan (lhs, rhs) -> LessThan (aux env lhs, aux env rhs)
@@ -967,6 +979,16 @@ let rec generate (letfuncs, strings) =
           ; "idiv rdi"
           ; tag_int "rax"
           ; "push rax" ]
+    | Positate ast -> ""
+    | Negate ast ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env ast ;
+        appstr buf "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf "neg rax" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | StructEqual (lhs, rhs) ->
         String.concat "\n"
           [ aux env lhs
