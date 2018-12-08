@@ -922,8 +922,7 @@ let rec generate (letfuncs, strings) =
     | StringValue _ -> "pop rax" (* TODO: string pattern match *)
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
-        String.concat "\n"
-          ["/* DEBUG2 */"; "pop rax"; sprintf "mov [rbp + %d], rax" offset]
+        String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
     | Cons (car, cdr) ->
         String.concat "\n"
           [ "pop rax"
@@ -1124,7 +1123,7 @@ let rec generate (letfuncs, strings) =
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
         appstr buf "pop r10" ;
-        appfmt buf "lea %s, [r10 + 8]" @@ reg_of_index @@ List.length args ;
+        appfmt buf "lea %s, [r10 + 16]" @@ reg_of_index @@ List.length args ;
         appstr buf "call [r10]" ;
         appstr buf "push rax" ;
         Buffer.contents buf
@@ -1154,14 +1153,15 @@ let rec generate (letfuncs, strings) =
         aux env body
     | MakeCls (funcname, nargs, freevars) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ gen_alloc_block (List.length freevars + 1) 0 247 ;
+        appstr buf @@ gen_alloc_block (List.length freevars + 2) 0 247 ;
         appfmt buf "lea rdi, [rip + %s]" funcname ;
         appstr buf "mov [rax], rdi" ;
+        appfmt buf "mov QWORD PTR [rax + 8], %d" @@ nargs ;
         List.iteri
           (fun i var ->
             let offset = HashMap.find var env.varoffset in
             appfmt buf "mov rdi, [rbp + %d]" offset ;
-            appfmt buf "mov [rax + %d], rdi" ((i + 1) * 8) )
+            appfmt buf "mov [rax + %d], rdi" ((i + 2) * 8) )
           freevars ;
         appstr buf "push rax" ;
         Buffer.contents buf
