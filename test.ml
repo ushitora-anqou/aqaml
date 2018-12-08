@@ -576,3 +576,12 @@ test (pos 10) 10 ;
 test (pos (-10)) (-10) ;
 test (neg 10) (-10) ;
 test (neg (-10)) 10
+
+let rec length = function _ :: xs -> 1 + length xs | _ -> 0
+
+;;
+test (length [1; 2; 3]) 3
+
+;;
+let rec length n = function _ :: xs -> length (n + 1) xs | _ -> n in
+test (length 0 [1; 2; 3]) 3
