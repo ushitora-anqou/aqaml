@@ -55,6 +55,7 @@ let make_label () = make_id ".L"
 
 type token =
   | IntLiteral of int
+  | CharLiteral of char
   | StringLiteral of string * string
   | Plus
   | Minus
@@ -90,6 +91,7 @@ type token =
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
+  | CharLiteral ch -> "'" ^ String.make 1 ch ^ "'"
   | StringLiteral (_, str) -> "\"" ^ str ^ "\""
   | Plus -> "+"
   | Minus -> "-"
@@ -157,6 +159,21 @@ let tokenize program =
       in
       aux i
     in
+    let next_char_literal i =
+      let i, ch = next_char i in
+      match ch with
+      | '\\' -> (
+          let i, ch = next_char i in
+          ( i + 1
+          , match ch with
+            | 'n' -> '\n'
+            | 't' -> '\t'
+            | '\\' -> '\\'
+            | '"' -> '"'
+            | '\'' -> '\''
+            | _ -> failwith "unexpected char in char literal" ) )
+      | ch -> (i + 1, ch)
+    in
     let next_string_literal i =
       let buf = Buffer.create 16 in
       let rec aux i =
@@ -200,6 +217,9 @@ let tokenize program =
       | '0' .. '9' ->
           let i, num = next_int (i - 1) 0 in
           IntLiteral num :: aux i
+      | '\'' ->
+          let i, ch = next_char_literal i in
+          CharLiteral ch :: aux i
       | '"' ->
           let i, str = next_string_literal i in
           StringLiteral (make_id "string", str) :: aux i
@@ -264,8 +284,9 @@ let tokenize program =
   aux 0
 
 type ast =
-  | IntValue of int
   | UnitValue
+  | IntValue of int
+  | CharValue of char
   | StringValue of string * string
   | TupleValue of ast list
   | Add of (ast * ast)
@@ -297,7 +318,7 @@ and pattern = ast
 
 let rec varnames_in_pattern = function
   (* TODO: much faster algorithm? *)
-  | IntValue _ | UnitValue | StringValue _ | EmptyList -> []
+  | UnitValue | IntValue _ | CharValue _ | StringValue _ | EmptyList -> []
   | Var varname -> [varname]
   | Cons (car, cdr) ->
       List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
@@ -319,6 +340,7 @@ let parse tokens =
   in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | CharLiteral ch :: tokens -> (tokens, CharValue ch)
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
@@ -544,6 +566,7 @@ let parse tokens =
   and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | CharLiteral ch :: tokens -> (tokens, CharValue ch)
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
@@ -638,7 +661,7 @@ let analyze ast =
   in
   let rec aux_ptn env ptn =
     match ptn with
-    | IntValue _ | UnitValue | EmptyList -> ptn
+    | IntValue _ | CharValue _ | UnitValue | EmptyList -> ptn
     | StringValue _ ->
         append_to_list_ref ptn toplevel.strings ;
         ptn
@@ -652,7 +675,7 @@ let analyze ast =
   in
   let rec aux env ast =
     match ast with
-    | IntValue _ | UnitValue | EmptyList -> ast
+    | IntValue _ | CharValue _ | UnitValue | EmptyList -> ast
     | StringValue _ ->
         append_to_list_ref ast toplevel.strings ;
         ast
@@ -907,14 +930,14 @@ let rec generate (letfuncs, strings) =
     | IntValue num ->
         let buf = Buffer.create 128 in
         let exit_label = make_label () in
-        appstr buf "/* pattern match IntValue BEGIN */" ;
         appstr buf "pop rax" ;
         appfmt buf "cmp rax, %d" @@ tagged_int num ;
         appfmt buf "je %s" exit_label ;
         appfmt buf "jmp %s" exp_label ;
         appfmt buf "%s:" exit_label ;
-        appstr buf "/* pattern match IntValue END */" ;
         Buffer.contents buf
+    | CharValue ch ->
+        gen_assign_pattern env exp_label @@ IntValue (Char.code ch)
     | StringValue (id, str) ->
         let buf = Buffer.create 128 in
         appstr buf "pop rax" ;
@@ -964,6 +987,7 @@ let rec generate (letfuncs, strings) =
   let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
+    | CharValue ch -> aux env @@ IntValue (Char.code ch)
     | UnitValue | EmptyList -> aux env (IntValue 0)
     | StringValue (id, _) -> sprintf "lea rax, [rip + %s]\npush rax" id
     | Cons (car, cdr) ->

@@ -710,3 +710,13 @@ test
   | _, ["def"; _] -> 1
   | _ -> 2 )
   1
+
+;;
+test ('a' = 'a') true ;
+test ('b' = 'c') false ;
+test ('\n' = '\n') true ;
+test ('\'' = '\'') true ;
+let ch = 'd' in
+test (ch = 'd') true ;
+test (ch = 'e') false ;
+test (match ch with 'a' -> 1 | 'e' -> 0 | 'd' -> 2 | _ -> 3) 2
