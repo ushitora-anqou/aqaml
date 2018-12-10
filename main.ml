@@ -291,6 +291,7 @@ type ast =
   | ExprSeq of ast list
   | MatchWith of ast * (pattern * ast) list
   | MakeCls of string * int * string list
+  | Lambda of pattern list * ast
 
 and pattern = ast
 
@@ -467,19 +468,10 @@ let parse tokens =
         | _ -> raise Unexpected_token )
   and parse_let = function
     | Function :: tokens ->
-        let funcname = ".function" in
-        let argname = ".function.arg" in
+        let argname = ".arg" in
         let tokens, cases = parse_pattern_match tokens in
-        ( tokens
-        , LetFunc
-            ( false
-            , funcname
-            , [Var argname]
-            , MatchWith (Var argname, cases)
-            , Var funcname
-            , [] ) )
+        (tokens, Lambda ([Var argname], MatchWith (Var argname, cases)))
     | Fun :: tokens ->
-        let funcname = ".fun" in
         let rec aux = function
           | Arrow :: tokens -> (tokens, [])
           | tokens ->
@@ -489,7 +481,7 @@ let parse tokens =
         in
         let tokens, args = aux tokens in
         let tokens, func = parse_expression tokens in
-        (tokens, LetFunc (false, funcname, args, func, Var funcname, []))
+        (tokens, Lambda (args, func))
     | Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
@@ -692,6 +684,9 @@ let analyze ast =
           env.freevars := (name, id) :: !(env.freevars) ;
           sym
       | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
+    | Lambda (args, body) ->
+        let funcname = ".lambda" in
+        aux env (LetFunc (false, funcname, args, body, Var funcname, []))
     | AppCls ((Var funcname as var), args) -> (
       try
         match
@@ -949,7 +944,6 @@ let rec generate (letfuncs, strings) =
     let exit_label = make_label () in
     let assign_code = gen_assign_pattern env exp_label ptn in
     let buf = Buffer.create 256 in
-    appstr buf "/* gen_assign_pattern_or_raise */" ;
     appstr buf assign_code ;
     appfmt buf "jmp %s" exit_label ;
     appfmt buf "%s:" exp_label ;
