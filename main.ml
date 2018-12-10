@@ -1386,7 +1386,8 @@ let rec generate (letfuncs, strings) =
       appfmt buf "%s:" label_ret ;
       appstr buf "mov rsp, rbp" ;
       appstr buf "pop rbp" ;
-      appstr buf "ret\n"
+      appstr buf "ret" ;
+      appstr buf ""
     done ;
     appstr buf "main:" ;
     (* give unit value as an argument *)

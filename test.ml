@@ -628,3 +628,74 @@ let f =
   g
 in
 test (f 0 1 2 3 4 5 6 7 8) 36
+
+let not x = if x then false else true
+
+;;
+test (not true) false ; test (not false) true
+
+let abs x = if x > 0 then x else -x
+
+;;
+test (abs 10) 10 ;
+test (abs (-10)) 10
+
+let alli f lst =
+  let rec aux i = function
+    | x :: xs -> if not (f i x) then false else aux (i + 1) xs
+    | _ -> true
+  in
+  aux 0 lst
+
+;;
+test (alli (fun i x -> x) []) true ;
+test (alli (fun i x -> x) [true; false; true]) false ;
+test (alli (fun i x -> x) [true; true; true]) true
+
+let rec mem item = function
+  | x :: xs -> if x = item then true else mem item xs
+  | _ -> false
+
+;;
+test (mem 10 [1; 2; 10; 9]) true ;
+test (mem 4 [1; 2; 3]) false
+
+let rec length lst =
+  let rec aux n = function _ :: xs -> aux (n + 1) xs | _ -> n in
+  aux 0 lst
+
+;;
+test (length [1; 2; 3]) 3 ;
+test (length []) 0
+
+;;
+let nqueen n =
+  let rec safe q qs =
+    if mem q qs then false
+    else
+      alli
+        (fun r' c ->
+          let r = r' + n - length qs in
+          let y = n - length qs - 1 in
+          abs (y - r) - abs (q - c) <> 0 )
+        qs
+  in
+  let rec aux qs =
+    if length qs = n then 1
+    else
+      let rec aux' total c =
+        if c = n then total
+        else aux' (if safe c qs then total + aux (c :: qs) else total) (c + 1)
+      in
+      aux' 0 0
+  in
+  aux []
+in
+test (nqueen 1) 1 ;
+test (nqueen 2) 0 ;
+test (nqueen 3) 0 ;
+test (nqueen 4) 2 ;
+test (nqueen 5) 10 ;
+test (nqueen 6) 4 ;
+test (nqueen 7) 40 ;
+test (nqueen 8) 92
