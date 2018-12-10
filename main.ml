@@ -1115,16 +1115,20 @@ let rec generate (letfuncs, strings) =
         appstr buf "push rax" ;
         Buffer.contents buf
     | AppCls (func, args) ->
+        (* call aqaml_appcls *)
+        (* TODO: Any better way exists? *)
+        (* TODO: only 9 or less arguments are allowed *)
+        if List.length args > 9 then
+          failwith "only 9 or less arguments are allowed (not implemented)" ;
         let buf = Buffer.create 128 in
         appstr buf @@ aux env func ;
         List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
         List.iteri
           (fun index reg ->
             if index < List.length args then appfmt buf "pop %s" reg )
-          ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
-        appstr buf "pop r10" ;
-        appfmt buf "lea %s, [r10 + 16]" @@ reg_of_index @@ List.length args ;
-        appstr buf "call [r10]" ;
+          ["rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
+        appstr buf "pop rax" ;
+        appfmt buf "call aqaml_appcls%d@PLT" @@ List.length args ;
         appstr buf "push rax" ;
         Buffer.contents buf
     | LetVar (false, bind, lhs, rhs) ->
@@ -1351,6 +1355,39 @@ let rec generate (letfuncs, strings) =
     appstr buf "shr rdi, 1" ;
     appstr buf "call exit@PLT" ;
     appstr buf "" ;
+    for nargs = 1 to 9 do
+      let label_loop = make_label () in
+      let label_exit = make_label () in
+      let label_ret = make_label () in
+      appfmt buf "aqaml_appcls%d:" nargs ;
+      appstr buf "push rbp" ;
+      appstr buf "mov rbp, rsp" ;
+      appstr buf "sub rsp, 16" ;
+      for i = nargs downto 1 do
+        appfmt buf "push %s" @@ reg_of_index i
+      done ;
+      appfmt buf "mov QWORD PTR [rbp - 8], %d" nargs ;
+      appfmt buf "%s:" label_loop ;
+      appstr buf "mov r10, rax" ;
+      appstr buf "mov r11, [rax + 8]" ;
+      appstr buf "sub [rbp - 8], r11" ;
+      for i = 0 to nargs - 1 do
+        appstr buf "cmp r11, 0" ;
+        appfmt buf "je %s" label_exit ;
+        appstr buf "dec r11" ;
+        appfmt buf "pop %s" @@ reg_of_index i ;
+        appfmt buf "lea %s, [r10 + 16]" @@ reg_of_index (i + 1)
+      done ;
+      appfmt buf "%s:" label_exit ;
+      appstr buf "call [r10]" ;
+      appstr buf "cmp QWORD PTR [rbp - 8], 0" ;
+      appfmt buf "je %s" label_ret ;
+      appfmt buf "jmp %s" label_loop ;
+      appfmt buf "%s:" label_ret ;
+      appstr buf "mov rsp, rbp" ;
+      appstr buf "pop rbp" ;
+      appstr buf "ret\n"
+    done ;
     appstr buf "main:" ;
     (* give unit value as an argument *)
     appfmt buf "mov rax, %d" @@ tagged_int 0 ;

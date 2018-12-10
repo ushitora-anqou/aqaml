@@ -585,3 +585,46 @@ test (length [1; 2; 3]) 3
 ;;
 let rec length n = function _ :: xs -> length (n + 1) xs | _ -> n in
 test (length 0 [1; 2; 3]) 3
+
+;;
+let rec mul n = function x -> n * x * pi in
+test (mul 2 3) 18
+
+;;
+let f () =
+  let g x y = function z -> (x * y) + z in
+  g
+in
+test (f () 4 2 3) 11
+
+;;
+let f =
+  let g x y = function z -> (x * y) + z in
+  g
+in
+test (f 4 2 3) 11
+
+;;
+let f =
+  let g x y z = (x * y) + z in
+  g
+in
+test (f 4 2 3) 11
+
+;;
+let f =
+  let g x = function y -> ( function z -> (x * y) + z ) in
+  g
+in
+test (f 4 2 3) 11
+
+;;
+let f =
+  let g x y z = function
+    | w ->
+        let h v a b c d = x + y + z + w + v + a + b + c + d in
+        h
+  in
+  g
+in
+test (f 0 1 2 3 4 5 6 7 8) 36
