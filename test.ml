@@ -699,3 +699,14 @@ test (nqueen 5) 10 ;
 test (nqueen 6) 4 ;
 test (nqueen 7) 40 ;
 test (nqueen 8) 92
+
+;;
+test (match "abc" with "def" -> 0 | "abc" -> 1 | _ -> 2) 1
+
+;;
+test
+  ( match ("abc", ["def"; "ghi"]) with
+  | "def", _ -> 0
+  | _, ["def"; _] -> 1
+  | _ -> 2 )
+  1

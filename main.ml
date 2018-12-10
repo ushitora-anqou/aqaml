@@ -544,6 +544,7 @@ let parse tokens =
   and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
+    | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens -> (tokens, Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
@@ -914,7 +915,14 @@ let rec generate (letfuncs, strings) =
         appfmt buf "%s:" exit_label ;
         appstr buf "/* pattern match IntValue END */" ;
         Buffer.contents buf
-    | StringValue _ -> "pop rax" (* TODO: string pattern match *)
+    | StringValue (id, str) ->
+        let buf = Buffer.create 128 in
+        appstr buf "pop rax" ;
+        appfmt buf "lea rbx, [rip + %s]" id ;
+        appstr buf "call aqaml_structural_equal" ;
+        appstr buf "cmp rax, 1" ;
+        appfmt buf "je %s" exp_label ;
+        Buffer.contents buf
     | Var varname ->
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
