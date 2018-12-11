@@ -313,6 +313,8 @@ type ast =
   | MatchWith of ast * (pattern * ast) list
   | MakeCls of string * int * string list
   | Lambda of pattern list * ast
+  (* TODO: module Ptn *)
+  | PtnOr of pattern * pattern
 
 and pattern = ast
 
@@ -326,6 +328,8 @@ let rec varnames_in_pattern = function
       List.fold_left
         (fun a b -> List.rev_append a (varnames_in_pattern b))
         [] values
+  | PtnOr (lhs, rhs) ->
+      List.rev_append (varnames_in_pattern lhs) (varnames_in_pattern rhs)
   | _ -> failwith "unexpected ast"
 
 exception Unexpected_token
@@ -610,7 +614,16 @@ let parse tokens =
     | [] -> raise Unexpected_token
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
-  and parse_pattern tokens = parse_pattern_tuple tokens
+  and parse_pattern_or tokens =
+    let rec aux lhs = function
+      | Bar :: tokens ->
+          let tokens, rhs = parse_pattern_tuple tokens in
+          aux (PtnOr (lhs, rhs)) tokens
+      | tokens -> (tokens, lhs)
+    in
+    let tokens, lhs = parse_pattern_tuple tokens in
+    aux lhs tokens
+  and parse_pattern tokens = parse_pattern_or tokens
   and parse_expressions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
      * are converted to (maybe large) one ExprSeq, and all 'let' without 'in'
@@ -671,6 +684,7 @@ let analyze ast =
       match find_symbol env name with
       | 0, sym -> sym
       | _ -> failwith "[FATAL] variable not found in pattern analysis" )
+    | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
     | _ -> failwith "unexpected pattern"
   in
   let rec aux env ast =
@@ -968,6 +982,20 @@ let rec generate (letfuncs, strings) =
           ; String.concat "\n"
               (List.map (gen_assign_pattern env exp_label) (List.rev values))
           ]
+    | PtnOr (lhs, rhs) ->
+        let next_label = make_label () in
+        let exit_label = make_label () in
+        let buf = Buffer.create 128 in
+        appstr buf "pop rax" ;
+        appstr buf "push rax" ;
+        appstr buf "push rax" ;
+        appstr buf @@ gen_assign_pattern env next_label lhs ;
+        appstr buf "pop rax" ;
+        appfmt buf "jmp %s" exit_label ;
+        appfmt buf "%s:" next_label ;
+        appstr buf @@ gen_assign_pattern env exp_label rhs ;
+        appfmt buf "%s:" exit_label ;
+        Buffer.contents buf
     | _ -> failwith "unexpected ast"
   in
   let rec gen_assign_pattern_or_raise env ptn =

@@ -720,3 +720,19 @@ let ch = 'd' in
 test (ch = 'd') true ;
 test (ch = 'e') false ;
 test (match ch with 'a' -> 1 | 'e' -> 0 | 'd' -> 2 | _ -> 3) 2
+
+;;
+test
+  (match 10 with 1 | 99 | 2 -> -99 | 0 | 3 | 4 -> 1 | 52 | 278 | 10 | 9 -> 2)
+  2
+
+;;
+let a = "abc" in
+let b = 10 in
+test
+  ( match (a, b) with
+  | "def", _ -> 0
+  | _, 3 -> 1
+  | "abc", x -> ( match x with 35 -> 2 | 9 | 2 -> 3 | x -> x - 2 )
+  | _ -> -1 )
+  8
