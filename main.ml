@@ -88,6 +88,7 @@ type token =
   | Bar
   | Fun
   | Function
+  | As
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -124,6 +125,7 @@ let string_of_token = function
   | Bar -> "|"
   | Fun -> "fun"
   | Function -> "function"
+  | As -> "as"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -238,6 +240,7 @@ let tokenize program =
           | "with" -> With
           | "fun" -> Fun
           | "function" -> Function
+          | "as" -> As
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -315,6 +318,7 @@ type ast =
   | Lambda of pattern list * ast
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
+  | PtnAlias of pattern * ast
 
 and pattern = ast
 
@@ -330,6 +334,7 @@ let rec varnames_in_pattern = function
         [] values
   | PtnOr (lhs, rhs) ->
       List.rev_append (varnames_in_pattern lhs) (varnames_in_pattern rhs)
+  | PtnAlias (ptn, Var name) -> name :: varnames_in_pattern ptn
   | _ -> failwith "unexpected ast"
 
 exception Unexpected_token
@@ -623,7 +628,12 @@ let parse tokens =
     in
     let tokens, lhs = parse_pattern_tuple tokens in
     aux lhs tokens
-  and parse_pattern tokens = parse_pattern_or tokens
+  and parse_pattern_as tokens =
+    let tokens, ptn = parse_pattern_or tokens in
+    match tokens with
+    | As :: Ident name :: tokens -> (tokens, PtnAlias (ptn, Var name))
+    | _ -> (tokens, ptn)
+  and parse_pattern tokens = parse_pattern_as tokens
   and parse_expressions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
      * are converted to (maybe large) one ExprSeq, and all 'let' without 'in'
@@ -684,6 +694,8 @@ let analyze ast =
       match find_symbol env name with
       | 0, sym -> sym
       | _ -> failwith "[FATAL] variable not found in pattern analysis" )
+    | PtnAlias (ptn, (Var _ as var)) ->
+        PtnAlias (aux_ptn env ptn, aux_ptn env var)
     | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
     | _ -> failwith "unexpected pattern"
   in
@@ -961,8 +973,11 @@ let rec generate (letfuncs, strings) =
         appfmt buf "je %s" exp_label ;
         Buffer.contents buf
     | Var varname ->
+        let buf = Buffer.create 128 in
         let offset = HashMap.find varname env.varoffset in
-        String.concat "\n" ["pop rax"; sprintf "mov [rbp + %d], rax" offset]
+        appstr buf "pop rax" ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        Buffer.contents buf
     | Cons (car, cdr) ->
         String.concat "\n"
           [ "pop rax"
@@ -982,6 +997,14 @@ let rec generate (letfuncs, strings) =
           ; String.concat "\n"
               (List.map (gen_assign_pattern env exp_label) (List.rev values))
           ]
+    | PtnAlias (ptn, Var varname) ->
+        let buf = Buffer.create 128 in
+        let offset = HashMap.find varname env.varoffset in
+        appstr buf "pop rax" ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        appstr buf "push rax" ;
+        appstr buf @@ gen_assign_pattern env exp_label ptn ;
+        Buffer.contents buf
     | PtnOr (lhs, rhs) ->
         let next_label = make_label () in
         let exit_label = make_label () in

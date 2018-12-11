@@ -736,3 +736,16 @@ test
   | "abc", x -> ( match x with 35 -> 2 | 9 | 2 -> 3 | x -> x - 2 )
   | _ -> -1 )
   8
+
+;;
+test
+  (let ((1, 2) as var) = (1, 2) in
+   var)
+  (1, 2)
+
+;;
+test
+  ( match (10, 20) with
+  | (10, 20) as t -> ( match t with 10, 20 -> true | _ -> false )
+  | _ -> false )
+  true
