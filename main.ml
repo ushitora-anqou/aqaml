@@ -937,6 +937,7 @@ let analyze ast =
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
 let rec generate (letfuncs, strings) =
+  let stack_size = ref 0 in
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -1018,7 +1019,11 @@ let rec generate (letfuncs, strings) =
     | PtnOr (lhs, rhs) ->
         let next_label = make_label () in
         let exit_label = make_label () in
+        let saved_rsp_offset = env.offset - 8 in
+        stack_size := max !stack_size (-saved_rsp_offset) ;
+        let env = {env with offset= saved_rsp_offset} in
         let buf = Buffer.create 128 in
+        appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
         appstr buf "pop rax" ;
         appstr buf "push rax" ;
         appstr buf "push rax" ;
@@ -1026,6 +1031,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "pop rax" ;
         appfmt buf "jmp %s" exit_label ;
         appfmt buf "%s:" next_label ;
+        appfmt buf "mov rsp, [rbp + %d]" saved_rsp_offset ;
         appstr buf @@ gen_assign_pattern env exp_label rhs ;
         appfmt buf "%s:" exit_label ;
         Buffer.contents buf
@@ -1045,7 +1051,6 @@ let rec generate (letfuncs, strings) =
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   in
-  let stack_size = ref 0 in
   let rec aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
     | CharValue ch -> aux env @@ IntValue (Char.code ch)
@@ -1296,7 +1301,6 @@ let rec generate (letfuncs, strings) =
               | None -> ()
               | Some expr ->
                   appstr buf @@ aux env expr ;
-                  appstr buf "/* DEBUGDEBUG */" ;
                   appstr buf "pop rax" ;
                   appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
                   appfmt buf "je %s" next_label ) ;
