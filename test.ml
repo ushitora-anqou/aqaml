@@ -749,3 +749,14 @@ test
   | (10, 20) as t -> ( match t with 10, 20 -> true | _ -> false )
   | _ -> false )
   true
+
+;;
+let flag = false in
+test (match 10 with 10 when flag -> 0 | 20 -> 1 | x when x = 10 -> 3) 3 ;
+test
+  ( match (1, 2) with
+  | x, y when x + y = 2 -> 0
+  | 2, y when y = 3 -> 1
+  | x, y when x - y = -1 -> 2
+  | _ -> 3 )
+  2

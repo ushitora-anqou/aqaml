@@ -89,6 +89,7 @@ type token =
   | Fun
   | Function
   | As
+  | When
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -126,6 +127,7 @@ let string_of_token = function
   | Fun -> "fun"
   | Function -> "function"
   | As -> "as"
+  | When -> "when"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -241,6 +243,7 @@ let tokenize program =
           | "fun" -> Fun
           | "function" -> Function
           | "as" -> As
+          | "when" -> When
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -313,7 +316,7 @@ type ast =
   | Cons of (ast * ast)
   | EmptyList
   | ExprSeq of ast list
-  | MatchWith of ast * (pattern * ast) list
+  | MatchWith of ast * (pattern * ast option * ast) list
   | MakeCls of string * int * string list
   | Lambda of pattern list * ast
   (* TODO: module Ptn *)
@@ -477,26 +480,29 @@ let parse tokens =
             | _ -> (tokens, IfThenElse (cond, then_body, None)) )
         | _ -> raise Unexpected_token )
     | tokens -> parse_tuple tokens
-  and parse_pattern_match = function
-    | Bar :: tokens | tokens -> (
+  and parse_pattern_match tokens =
+    let rec aux first cases tokens =
+      let aux' tokens =
         let tokens, ptn = parse_pattern tokens in
+        let tokens, whn =
+          match tokens with
+          | When :: tokens ->
+              let tokens, expr = parse_expression tokens in
+              (tokens, Some expr)
+          | _ -> (tokens, None)
+        in
         match tokens with
         | Arrow :: tokens ->
-            let rec aux = function
-              | Bar :: tokens -> (
-                  let tokens, ptn = parse_pattern tokens in
-                  match tokens with
-                  | Arrow :: tokens ->
-                      let tokens, case = parse_expression tokens in
-                      let tokens, cases = aux tokens in
-                      (tokens, (ptn, case) :: cases)
-                  | _ -> raise Unexpected_token )
-              | tokens -> (tokens, [])
-            in
             let tokens, case = parse_expression tokens in
-            let tokens, cases = aux tokens in
-            (tokens, (ptn, case) :: cases)
-        | _ -> raise Unexpected_token )
+            let tokens, cases = aux false ((ptn, whn, case) :: cases) tokens in
+            (tokens, cases)
+        | _ -> raise Unexpected_token
+      in
+      match tokens with
+      | Bar :: tokens -> aux' tokens
+      | _ -> if first then aux' tokens else (tokens, List.rev cases)
+    in
+    aux true [] tokens
   and parse_let = function
     | Function :: tokens ->
         let argname = ".arg" in
@@ -901,11 +907,15 @@ let analyze ast =
         MatchWith
           ( aux env cond
           , List.map
-              (fun (ptn, ast) ->
+              (fun (ptn, whn, ast) ->
                 let env' =
                   {env with symbols= add_symbols_in_pattern env.symbols ptn}
                 in
-                (aux_ptn env' ptn, aux env' ast) )
+                ( aux_ptn env' ptn
+                , ( match whn with
+                  | Some expr -> Some (aux env' expr)
+                  | None -> None )
+                , aux env' ast ) )
               cases )
     | _ -> failwith "unexpected ast"
   in
@@ -1257,7 +1267,7 @@ let rec generate (letfuncs, strings) =
         let exit_label = make_label () in
         let exp_label =
           List.fold_left
-            (fun this_label (ptn, case) ->
+            (fun this_label (ptn, whn, case) ->
               let varnames = varnames_in_pattern ptn in
               let offset = env.offset - (List.length varnames * 8) in
               stack_size := max !stack_size (-offset) ;
@@ -1282,6 +1292,14 @@ let rec generate (letfuncs, strings) =
               appstr buf "push rax" ;
               appstr buf "push rax" ;
               appstr buf @@ gen_assign_pattern env next_label ptn ;
+              ( match whn with
+              | None -> ()
+              | Some expr ->
+                  appstr buf @@ aux env expr ;
+                  appstr buf "/* DEBUGDEBUG */" ;
+                  appstr buf "pop rax" ;
+                  appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
+                  appfmt buf "je %s" next_label ) ;
               appstr buf "pop rax" ;
               appstr buf @@ aux env case ;
               appfmt buf "jmp %s /* exit label */" exit_label ;
