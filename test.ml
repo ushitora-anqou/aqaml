@@ -769,3 +769,17 @@ test
     match y with [a; b] -> a + (b * x) | _ -> 2 )
   | _ -> 1 )
   19
+
+type furikake = Noritama | Okaka | Syake
+
+;;
+let f = Okaka in
+let Noritama = Noritama in
+test (match f with Noritama -> 0 | Okaka -> 1 | Syake -> 2) 1
+
+;;
+let rec map f = function x :: xs -> f x :: map f xs | _ -> [] in
+let fs = [Syake; Okaka; Syake] in
+test
+  (map (function Noritama -> "n" | Okaka -> "o" | Syake -> "s") fs)
+  ["s"; "o"; "s"]
