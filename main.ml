@@ -94,6 +94,10 @@ type token =
   | When
   | Type
   | Dot
+  | Of
+  | KwInt
+  | KwChar
+  | KwString
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -134,6 +138,10 @@ let string_of_token = function
   | When -> "when"
   | Type -> "type"
   | Dot -> "."
+  | Of -> "of"
+  | KwInt -> "int"
+  | KwChar -> "char"
+  | KwString -> "string"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -251,6 +259,10 @@ let tokenize program =
           | "as" -> As
           | "when" -> When
           | "type" -> Type
+          | "of" -> Of
+          | "int" -> KwInt
+          | "char" -> KwChar
+          | "string" -> KwString
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -297,6 +309,8 @@ let tokenize program =
   in
   aux 0
 
+type typ = TyInt | TyChar | TyString | TyLst of typ | TyTuple of typ list
+
 type ast =
   | UnitValue
   | IntValue of int
@@ -330,8 +344,8 @@ type ast =
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
-  | TypeDef of string * string list
-  | Ctor of string option * string
+  | TypeDef of string * (string * typ option) list
+  | CtorApp of string option * string * ast option
 
 and pattern = ast
 
@@ -348,7 +362,8 @@ let rec varnames_in_pattern = function
   | PtnOr (lhs, rhs) ->
       List.rev_append (varnames_in_pattern lhs) (varnames_in_pattern rhs)
   | PtnAlias (ptn, Var name) -> name :: varnames_in_pattern ptn
-  | Ctor _ -> []
+  | CtorApp (_, _, None) -> []
+  | CtorApp (_, _, Some arg) -> varnames_in_pattern arg
   | _ -> failwith "unexpected ast"
 
 exception Unexpected_token
@@ -369,7 +384,7 @@ let parse tokens =
     | Ident modname :: Dot :: Ident varname :: tokens ->
         (tokens, Var (modname ^ "." ^ varname))
     | Ident id :: tokens ->
-        (tokens, if is_capital id.[0] then Ctor (None, id) else Var id)
+        (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
@@ -599,7 +614,7 @@ let parse tokens =
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
     | Ident id :: tokens ->
-        (tokens, if is_capital id.[0] then Ctor (None, id) else Var id)
+        (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
         let tokens, ast = parse_pattern tokens in
@@ -655,14 +670,31 @@ let parse tokens =
     | As :: Ident name :: tokens -> (tokens, PtnAlias (ptn, Var name))
     | _ -> (tokens, ptn)
   and parse_pattern tokens = parse_pattern_as tokens
+  and parse_typexpr_primary = function
+    | KwInt :: tokens -> (tokens, TyInt)
+    | KwChar :: tokens -> (tokens, TyChar)
+    | KwString :: tokens -> (tokens, TyString)
+    | LParen :: tokens -> (
+        let tokens, typ = parse_typexpr tokens in
+        match tokens with
+        | RParen :: tokens -> (tokens, typ)
+        | _ -> raise Unexpected_token )
+    | _ -> raise Unexpected_token
+  and parse_typexpr tokens = parse_typexpr_primary tokens
   and parse_type_def = function
     (* token Type is already fetched *)
     | Ident typename :: Equal :: tokens ->
         let rec aux first ctors = function
+          | Bar :: Ident ctorname :: Of :: tokens ->
+              let tokens, typ = parse_typexpr tokens in
+              aux false ((ctorname, Some typ) :: ctors) tokens
+          | Ident ctorname :: Of :: tokens when first ->
+              let tokens, typ = parse_typexpr tokens in
+              aux false ((ctorname, Some typ) :: ctors) tokens
           | Bar :: Ident ctorname :: tokens ->
-              aux false (ctorname :: ctors) tokens
+              aux false ((ctorname, None) :: ctors) tokens
           | Ident ctorname :: tokens when first ->
-              aux false (ctorname :: ctors) tokens
+              aux false ((ctorname, None) :: ctors) tokens
           | tokens -> (tokens, ctors)
         in
         let tokens, ctors = aux true [] tokens in
@@ -739,8 +771,9 @@ let analyze ast =
     | PtnAlias (ptn, (Var _ as var)) ->
         PtnAlias (aux_ptn env ptn, aux_ptn env var)
     | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
-    | Ctor (None, ctorname) ->
-        Ctor (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname)
+    | CtorApp (None, ctorname, None) ->
+        CtorApp
+          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, None)
     | _ -> failwith "unexpected pattern"
   in
   let rec aux env ast =
@@ -781,6 +814,14 @@ let analyze ast =
     | Lambda (args, body) ->
         let funcname = ".lambda" in
         aux env (LetFunc (false, funcname, args, body, Var funcname, []))
+    | CtorApp (None, ctorname, None) ->
+        CtorApp
+          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, None)
+    | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
+      match aux env ctor with
+      | CtorApp (typename, ctorname, None) when List.length args = 1 ->
+          CtorApp (typename, ctorname, Some (aux env @@ List.hd args))
+      | _ -> failwith "invalid CtorApp" )
     | AppCls ((Var funcname as var), args) -> (
       try
         match
@@ -958,11 +999,10 @@ let analyze ast =
     | TypeDef (typename, ctornames) ->
         let typename = make_id typename in
         List.iter
-          (fun ctorname -> Hashtbl.add toplevel.ctors_type ctorname typename)
+          (fun (ctorname, _) ->
+            Hashtbl.add toplevel.ctors_type ctorname typename )
           ctornames ;
         TypeDef (typename, ctornames)
-    | Ctor (None, ctorname) ->
-        Ctor (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname)
     | _ -> failwith "unexpected ast"
   in
   let env =
@@ -1082,7 +1122,7 @@ let rec generate (letfuncs, strings) =
         appstr buf @@ gen_assign_pattern env exp_label rhs ;
         appfmt buf "%s:" exit_label ;
         Buffer.contents buf
-    | Ctor (Some typename, ctorname) ->
+    | CtorApp (Some typename, ctorname, None) ->
         gen_assign_pattern env exp_label
         @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
     | _ -> failwith "unexpected ast"
@@ -1246,6 +1286,17 @@ let rec generate (letfuncs, strings) =
         String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
       with Not_found ->
         failwith (sprintf "not found in code generation: %s" varname) )
+    | CtorApp (Some typename, ctorname, None) ->
+        aux env @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
+    | CtorApp (Some typename, ctorname, Some arg) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ gen_alloc_block 1 0
+        @@ Hashtbl.find ctors_id (typename, ctorname) ;
+        appstr buf @@ aux env arg ;
+        appstr buf "pop rdi" ;
+        appfmt buf "mov [rax], rdi" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | AppDir (funcname, args) ->
         let buf = Buffer.create 128 in
         List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
@@ -1369,11 +1420,9 @@ let rec generate (letfuncs, strings) =
         Buffer.contents buf
     | TypeDef (typename, ctornames) ->
         List.iteri
-          (fun i ctorname -> Hashtbl.add ctors_id (typename, ctorname) i)
+          (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;
         ""
-    | Ctor (Some typename, ctorname) ->
-        aux env @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
     | _ -> failwith "unexpected ast"
   in
   let strings_code =

@@ -770,7 +770,7 @@ test
   | _ -> 1 )
   19
 
-type furikake = Noritama | Okaka | Syake
+type furikake = Noritama | Okaka | Syake | Powder of int
 
 ;;
 let f = Okaka in
@@ -783,3 +783,9 @@ let fs = [Syake; Okaka; Syake] in
 test
   (map (function Noritama -> "n" | Okaka -> "o" | Syake -> "s") fs)
   ["s"; "o"; "s"]
+
+;;
+let a = Powder 19 in
+let b = Noritama in
+test (a = b) false ;
+test (a <> b) true

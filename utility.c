@@ -60,6 +60,8 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs_src,
 {
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
 
+    if (lhs.kind != rhs.kind) return 0;
+
     switch (lhs.kind) {
     case AQAML_INTEGER:
         return lhs.integer == rhs.integer;
