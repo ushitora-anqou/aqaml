@@ -828,3 +828,19 @@ test
       e + d
   | _ -> 2 )
   30
+
+type adder =
+  | Adder2 of int * int
+  | Adder3 of int * int * int
+  | Adder4 of int * int * int * int
+  | AdderSpecial of int * (string * int)
+
+;;
+let add = function
+  | Adder2 (a, b) -> a + b
+  | Adder3 (a, b, c) -> a + b + c
+  | Adder4 (a, b, c, d) -> a + b + c + d
+  | AdderSpecial (a, (str, b)) -> (a * String.length str) + b
+in
+test (add (Adder2 (10, 20))) 30 ;
+test (add (AdderSpecial (23, ("abc", -4)))) 65

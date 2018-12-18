@@ -687,7 +687,20 @@ let parse tokens =
         | RParen :: tokens -> (tokens, typ)
         | _ -> raise Unexpected_token )
     | _ -> raise Unexpected_token
-  and parse_typexpr tokens = parse_typexpr_primary tokens
+  and parse_typexpr_tuple tokens =
+    let rec aux lhs = function
+      | Star :: tokens ->
+          let tokens, rhs = parse_typexpr_primary tokens in
+          aux (rhs :: lhs) tokens
+      | tokens -> (tokens, lhs)
+    in
+    let tokens, typexpr = parse_typexpr_primary tokens in
+    let tokens, typexprs = aux [typexpr] tokens in
+    match typexprs with
+    | [] -> raise Unexpected_token
+    | [typexpr] -> (tokens, typexpr)
+    | typexprs -> (tokens, TyTuple typexprs)
+  and parse_typexpr tokens = parse_typexpr_tuple tokens
   and parse_type_def = function
     (* token Type is already fetched *)
     | Ident typename :: Equal :: tokens ->
