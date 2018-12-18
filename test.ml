@@ -844,3 +844,44 @@ let add = function
 in
 test (add (Adder2 (10, 20))) 30 ;
 test (add (AdderSpecial (23, ("abc", -4)))) 65
+
+(* thanks to http://www.fos.kuis.kyoto-u.ac.jp/~igarashi/class/pl/03-ocaml.html *)
+type furikake = Shake | Katsuo | Nori
+
+let isVeggie = function Shake | Katsuo -> false | Nori -> true
+
+;;
+test (isVeggie Shake) false
+
+type miso = Aka | Shiro | Awase
+
+type gu = Wakame | Tofu | Radish
+
+type dish = PorkCutlet | Soup of miso * gu | Rice of furikake
+
+;;
+test PorkCutlet PorkCutlet ;
+test (Soup (Aka, Tofu)) (Soup (Aka, Tofu)) ;
+test (Rice Shake) (Rice Shake)
+
+let isSolid = function PorkCutlet | Rice _ -> true | Soup _ -> false
+
+;;
+test (isSolid (Rice Shake)) true
+
+let price_of_dish = function
+  | PorkCutlet -> 350
+  | Soup _ -> 90
+  | Rice (Shake | Katsuo) -> 90
+  | Rice Nori -> 80
+
+;;
+test (price_of_dish (Rice Shake)) 90
+
+;;
+let isVeggieDish = function
+  | PorkCutlet -> false
+  | Soup _ -> true
+  | Rice f -> isVeggie f
+in
+test (isVeggieDish (Rice Katsuo)) false

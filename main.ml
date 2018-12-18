@@ -309,7 +309,12 @@ let tokenize program =
   in
   aux 0
 
-type typ = TyInt | TyChar | TyString | TyLst of typ | TyTuple of typ list
+type typ =
+  | TyInt
+  | TyChar
+  | TyString
+  | TyTuple of typ list
+  | TyCustom of string
 
 type ast =
   | UnitValue
@@ -681,6 +686,7 @@ let parse tokens =
     | KwInt :: tokens -> (tokens, TyInt)
     | KwChar :: tokens -> (tokens, TyChar)
     | KwString :: tokens -> (tokens, TyString)
+    | Ident typename :: tokens -> (tokens, TyCustom typename)
     | LParen :: tokens -> (
         let tokens, typ = parse_typexpr tokens in
         match tokens with
