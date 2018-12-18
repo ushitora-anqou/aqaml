@@ -370,8 +370,8 @@ exception Unexpected_token
 
 let parse tokens =
   let rec is_primary = function
-    | ( IntLiteral _ | StringLiteral _ | Ident _ | LRBracket | LParen
-      | LBracket | LRParen )
+    | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | Ident _ | LRBracket
+      | LParen | LBracket | LRParen )
       :: _ ->
         true
     | _ -> false
@@ -634,8 +634,15 @@ let parse tokens =
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
+  and parse_pattern_ctor_app tokens =
+    let tokens, ctorapp = parse_pattern_primary tokens in
+    match ctorapp with
+    | CtorApp (None, ctorname, None) when is_primary tokens ->
+        let tokens, arg = parse_pattern_primary tokens in
+        (tokens, CtorApp (None, ctorname, Some arg))
+    | _ -> (tokens, ctorapp)
   and parse_pattern_cons tokens =
-    let tokens, car = parse_pattern_primary tokens in
+    let tokens, car = parse_pattern_ctor_app tokens in
     match tokens with
     | ColonColon :: tokens ->
         let tokens, cdr = parse_pattern_cons tokens in
@@ -771,9 +778,12 @@ let analyze ast =
     | PtnAlias (ptn, (Var _ as var)) ->
         PtnAlias (aux_ptn env ptn, aux_ptn env var)
     | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
-    | CtorApp (None, ctorname, None) ->
+    | CtorApp (None, ctorname, arg) ->
+        let arg =
+          match arg with Some arg -> Some (aux_ptn env arg) | _ -> None
+        in
         CtorApp
-          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, None)
+          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, arg)
     | _ -> failwith "unexpected pattern"
   in
   let rec aux env ast =
@@ -1125,6 +1135,21 @@ let rec generate (letfuncs, strings) =
     | CtorApp (Some typename, ctorname, None) ->
         gen_assign_pattern env exp_label
         @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
+    | CtorApp (Some typename, ctorname, Some arg) ->
+        let buf = Buffer.create 128 in
+        let id = Hashtbl.find ctors_id (typename, ctorname) in
+        appfmt buf "pop rax" ;
+        appstr buf "mov rdi, rax" ;
+        appstr buf "and rax, 1" ;
+        appstr buf "cmp rax, 0" ;
+        appfmt buf "jne %s" exp_label ;
+        appstr buf "mov rax, [rdi - 8]" ;
+        appstr buf "and rax, 0xff" ;
+        appfmt buf "cmp rax, %d" id ;
+        appfmt buf "jne %s" exp_label ;
+        appstr buf "push [rdi]" ;
+        appstr buf @@ gen_assign_pattern env exp_label arg ;
+        Buffer.contents buf
     | _ -> failwith "unexpected ast"
   in
   let rec gen_assign_pattern_or_raise env ptn =
@@ -1292,8 +1317,10 @@ let rec generate (letfuncs, strings) =
         let buf = Buffer.create 128 in
         appstr buf @@ gen_alloc_block 1 0
         @@ Hashtbl.find ctors_id (typename, ctorname) ;
+        appstr buf "push rax" ;
         appstr buf @@ aux env arg ;
         appstr buf "pop rdi" ;
+        appstr buf "pop rax" ;
         appfmt buf "mov [rax], rdi" ;
         appstr buf "push rax" ;
         Buffer.contents buf

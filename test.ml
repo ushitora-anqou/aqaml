@@ -770,7 +770,12 @@ test
   | _ -> 1 )
   19
 
-type furikake = Noritama | Okaka | Syake | Powder of int
+type furikake =
+  | Noritama
+  | Okaka
+  | Syake
+  | Powder of int
+  | PowderSpecial of string
 
 ;;
 let f = Okaka in
@@ -779,13 +784,47 @@ test (match f with Noritama -> 0 | Okaka -> 1 | Syake -> 2) 1
 
 ;;
 let rec map f = function x :: xs -> f x :: map f xs | _ -> [] in
-let fs = [Syake; Okaka; Syake] in
+let fs = [Syake; Okaka; Syake; Powder 20; PowderSpecial "abc"] in
 test
-  (map (function Noritama -> "n" | Okaka -> "o" | Syake -> "s") fs)
-  ["s"; "o"; "s"]
+  (map
+     (function
+       | Noritama -> "n"
+       | Okaka -> "o"
+       | Syake -> "s"
+       | Powder _ -> "p"
+       | PowderSpecial _ -> "ps")
+     fs)
+  ["s"; "o"; "s"; "p"; "ps"]
 
 ;;
 let a = Powder 19 in
 let b = Noritama in
 test (a = b) false ;
 test (a <> b) true
+
+;;
+let fu = Powder 19 in
+test
+  ( match fu with
+  | Noritama -> "n"
+  | Okaka -> "o"
+  | Syake -> "s"
+  | PowderSpecial "abc" -> "psABC"
+  | PowderSpecial _ -> "ps???"
+  | Powder 10 -> "p10"
+  | Powder n -> "p??" )
+  "p??"
+
+;;
+test
+  ( match
+      [ (Noritama, [Powder 10; Okaka])
+      ; (Powder 20, [Noritama; Okaka])
+      ; (Syake, [Powder 3; PowderSpecial "abc"]) ]
+    with
+  | [(_, [Powder 10; Okaka]); (Okaka, [Noritama; Okaka]); x] -> 0
+  | [(Noritama, [x; Okaka]); (Powder d, [Noritama; Okaka]); (Syake, _)] ->
+      let (Powder e) = x in
+      e + d
+  | _ -> 2 )
+  30
