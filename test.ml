@@ -897,3 +897,15 @@ test (div 5 0) None
 let s = Soup (Aka, Tofu) in
 let (Soup (m, g)) = s in
 test Aka Aka ; test g Tofu
+
+
+;;
+let find lst t =
+  let rec aux = function
+    | x :: xs ->
+        if x = t then true else aux xs
+    | [] -> false
+  in
+  aux lst
+in
+test (find ["1"; "2"; "3"] "2") true

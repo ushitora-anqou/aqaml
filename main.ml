@@ -1654,6 +1654,7 @@ let rec generate (letfuncs, strings) =
       appstr buf "mov r10, rax" ;
       appstr buf "mov r11, [rax + 8]" ;
       appstr buf "sub [rbp - 8], r11" ;
+      appstr buf "lea rax, [r10 + 16]" ;
       for i = 0 to nargs - 1 do
         appstr buf "cmp r11, 0" ;
         appfmt buf "je %s" label_exit ;
