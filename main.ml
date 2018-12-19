@@ -942,24 +942,18 @@ let analyze ast =
           let env' =
             {env with symbols= add_symbols_in_pattern env.symbols bind}
           in
-          (* if recursive then funcname should be in env *)
-          let env =
-            match bind with
-            | Var name when recursive -> env'
-            | _ when recursive ->
-                failwith "when recursive only Var is allowed in let"
-            | _ -> env
-          in
           LetVar (false, aux_ptn env' bind, aux env lhs, aux env' rhs)
     | LetFunc (recursive, funcname, args, func, body, _) ->
         let toplevel_backup = toplevel in
         let gen_funcname = make_id funcname in
-        (* when first run, assume that the function is not recursive,
-         * or recursive and has no freevars. Then funcvar is FuncVar.
-         * At the second time, funcvar is Var. *)
         let rec analyze_func first =
           let funcvar =
-            (* The function that is recursive and has freevars should be a closure. *)
+            (* Try FuncVar first, that is, at first
+             * we try to call this function by name.
+             * That means we assume that the function is not recursive,
+             * or recursive and has no freevars.
+             * If we find we can't,
+             * then Var is used, which means it should be called as closure *)
             if first then FuncVar (gen_funcname, List.length args)
             else Var gen_funcname
           in
@@ -984,7 +978,8 @@ let analyze ast =
             toplevel.strings := !(toplevel_backup.strings) ;
             analyze_func false )
           else if not first then
-            (* The function that is recursive and has freevars should be a closure. *)
+            (* The function that is recursive and has freevars should be called as closure
+             * IN THAT FUNCTION ITSELF. (Of course outside too, but here that's not important. *)
             ( env_in
             , LetVar
                 ( false
@@ -992,7 +987,9 @@ let analyze ast =
                 , MakeCls (gen_funcname, List.length args, freevars)
                 , func )
             , freevars )
-          else (env_in, func, freevars)
+          else
+            (* The function don't have to be called as closure, AT LEAST IN THAT FUNCTION ITSELF. *)
+            (env_in, func, freevars)
         in
         (* TODO: duplicated freevars *)
         let env_in, func, freevars = analyze_func true in
