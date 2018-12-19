@@ -98,6 +98,7 @@ type token =
   | KwInt
   | KwChar
   | KwString
+  | Apostrophe
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -142,6 +143,7 @@ let string_of_token = function
   | KwInt -> "int"
   | KwChar -> "char"
   | KwString -> "string"
+  | Apostrophe -> "'"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -235,9 +237,14 @@ let tokenize program =
       | '0' .. '9' ->
           let i, num = next_int (i - 1) 0 in
           IntLiteral num :: aux i
-      | '\'' ->
-          let i, ch = next_char_literal i in
-          CharLiteral ch :: aux i
+      | '\'' -> (
+          let _, ch0 = next_char i in
+          let _, ch1 = next_char (i + 1) in
+          match (ch0, ch1) with
+          | _, '\'' | '\\', _ ->
+              let i, ch = next_char_literal i in
+              CharLiteral ch :: aux i
+          | _ -> Apostrophe :: aux i )
       | '"' ->
           let i, str = next_string_literal i in
           StringLiteral (make_id "string", str) :: aux i
@@ -315,6 +322,7 @@ type typ =
   | TyString
   | TyTuple of typ list
   | TyCustom of string
+  | TyVar of string
 
 type ast =
   | UnitValue
@@ -349,7 +357,7 @@ type ast =
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
-  | TypeDef of string * (string * typ option) list
+  | TypeDef of typ option * string * (string * typ option) list
   | CtorApp of string option * string * ast option
 
 and pattern = ast
@@ -686,6 +694,7 @@ let parse tokens =
     | KwInt :: tokens -> (tokens, TyInt)
     | KwChar :: tokens -> (tokens, TyChar)
     | KwString :: tokens -> (tokens, TyString)
+    | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)
     | Ident typename :: tokens -> (tokens, TyCustom typename)
     | LParen :: tokens -> (
         let tokens, typ = parse_typexpr tokens in
@@ -707,25 +716,48 @@ let parse tokens =
     | [typexpr] -> (tokens, typexpr)
     | typexprs -> (tokens, TyTuple typexprs)
   and parse_typexpr tokens = parse_typexpr_tuple tokens
-  and parse_type_def = function
+  and parse_type_def tokens =
     (* token Type is already fetched *)
-    | Ident typename :: Equal :: tokens ->
-        let rec aux first ctors = function
-          | Bar :: Ident ctorname :: Of :: tokens ->
-              let tokens, typ = parse_typexpr tokens in
-              aux false ((ctorname, Some typ) :: ctors) tokens
-          | Ident ctorname :: Of :: tokens when first ->
-              let tokens, typ = parse_typexpr tokens in
-              aux false ((ctorname, Some typ) :: ctors) tokens
-          | Bar :: Ident ctorname :: tokens ->
-              aux false ((ctorname, None) :: ctors) tokens
-          | Ident ctorname :: tokens when first ->
-              aux false ((ctorname, None) :: ctors) tokens
-          | tokens -> (tokens, ctors)
-        in
-        let tokens, ctors = aux true [] tokens in
-        (tokens, TypeDef (typename, ctors))
-    | _ -> raise Unexpected_token
+    let aux type_param = function
+      | Ident typename :: Equal :: tokens ->
+          let rec aux first ctors = function
+            | Bar :: Ident ctorname :: Of :: tokens ->
+                let tokens, typ = parse_typexpr tokens in
+                aux false ((ctorname, Some typ) :: ctors) tokens
+            | Ident ctorname :: Of :: tokens when first ->
+                let tokens, typ = parse_typexpr tokens in
+                aux false ((ctorname, Some typ) :: ctors) tokens
+            | Bar :: Ident ctorname :: tokens ->
+                aux false ((ctorname, None) :: ctors) tokens
+            | Ident ctorname :: tokens when first ->
+                aux false ((ctorname, None) :: ctors) tokens
+            | tokens -> (tokens, ctors)
+          in
+          let tokens, ctors = aux true [] tokens in
+          (tokens, TypeDef (type_param, typename, ctors))
+      | _ -> raise Unexpected_token
+    in
+    let parse_type_param = function
+      | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)
+      | _ -> raise Unexpected_token
+    in
+    let parse_type_params = function
+      | LParen :: tokens ->
+          let rec aux type_params = function
+            | Comma :: tokens ->
+                let tokens, type_param = parse_type_param tokens in
+                aux (type_param :: type_params) tokens
+            | RParen :: tokens -> (tokens, TyTuple type_params)
+            | _ -> raise Unexpected_token
+          in
+          let tokens, type_param = parse_type_param tokens in
+          Some (aux [type_param] tokens)
+      | Apostrophe :: _ as tokens -> Some (parse_type_param tokens)
+      | _ -> None
+    in
+    match parse_type_params tokens with
+    | None -> aux None tokens
+    | Some (tokens, type_params) -> aux (Some type_params) tokens
   and parse_expressions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
      * are converted to (maybe large) one ExprSeq, and all 'let' without 'in'
@@ -1025,13 +1057,13 @@ let analyze ast =
                   | None -> None )
                 , aux env' ast ) )
               cases )
-    | TypeDef (typename, ctornames) ->
+    | TypeDef (type_param, typename, ctornames) ->
         let typename = make_id typename in
         List.iter
           (fun (ctorname, _) ->
             Hashtbl.add toplevel.ctors_type ctorname typename )
           ctornames ;
-        TypeDef (typename, ctornames)
+        TypeDef (type_param, typename, ctornames)
     | _ -> failwith "unexpected ast"
   in
   let env =
@@ -1464,7 +1496,7 @@ let rec generate (letfuncs, strings) =
         appfmt buf "%s:" exit_label ;
         appstr buf "/* MatchWith END */" ;
         Buffer.contents buf
-    | TypeDef (typename, ctornames) ->
+    | TypeDef (_, typename, ctornames) ->
         List.iteri
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;

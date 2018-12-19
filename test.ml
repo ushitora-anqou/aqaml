@@ -885,3 +885,10 @@ let isVeggieDish = function
   | Rice f -> isVeggie f
 in
 test (isVeggieDish (Rice Katsuo)) false
+
+type 'a option = Some of 'a | None
+
+;;
+let div x y = if y = 0 then None else Some (x / y) in
+test (div 12 3) (Some 4) ;
+test (div 5 0) None
