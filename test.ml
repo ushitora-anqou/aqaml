@@ -892,3 +892,8 @@ type 'a option = Some of 'a | None
 let div x y = if y = 0 then None else Some (x / y) in
 test (div 12 3) (Some 4) ;
 test (div 5 0) None
+
+;;
+let s = Soup (Aka, Tofu) in
+let (Soup (m, g)) = s in
+test Aka Aka ; test g Tofu

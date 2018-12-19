@@ -1500,7 +1500,7 @@ let rec generate (letfuncs, strings) =
         List.iteri
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;
-        ""
+        "push 0 /* dummy */"
     | _ -> failwith "unexpected ast"
   in
   let strings_code =
