@@ -898,14 +898,31 @@ let s = Soup (Aka, Tofu) in
 let (Soup (m, g)) = s in
 test Aka Aka ; test g Tofu
 
-
 ;;
 let find lst t =
   let rec aux = function
-    | x :: xs ->
-        if x = t then true else aux xs
+    | x :: xs -> if x = t then true else aux xs
     | [] -> false
   in
   aux lst
 in
 test (find ["1"; "2"; "3"] "2") true
+
+type ('a, 'b) hashmap = Data of ('a * 'b) list
+
+;;
+let create () = Data [] in
+let add (Data m) k v = Data ((k, v) :: m) in
+let find (Data m) k =
+  let rec aux = function
+    | (x, y) :: xs -> if x = k then Some y else aux xs
+    | [] -> None
+  in
+  aux m
+in
+let m = create () in
+let m = add m "kutimane" 3 in
+let m = add m "busu" 2 in
+let m = add m "kouji" 1 in
+let m = add m "sibiri" 1 in
+test (find m "busu") (Some 2)

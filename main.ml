@@ -323,6 +323,7 @@ type typ =
   | TyTuple of typ list
   | TyCustom of string
   | TyVar of string
+  | TyCtorApp of (typ * string)
 
 type ast =
   | UnitValue
@@ -382,7 +383,7 @@ let rec varnames_in_pattern = function
 exception Unexpected_token
 
 let parse tokens =
-  let rec is_primary = function
+  let is_primary = function
     | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | Ident _ | LRBracket
       | LParen | LBracket | LRParen )
       :: _ ->
@@ -702,14 +703,22 @@ let parse tokens =
         | RParen :: tokens -> (tokens, typ)
         | _ -> raise Unexpected_token )
     | _ -> raise Unexpected_token
+  and parse_typexpr_ctor_app tokens =
+    let rec aux typexpr = function
+      | Ident typectorname :: tokens ->
+          aux (TyCtorApp (typexpr, typectorname)) tokens
+      | tokens -> (tokens, typexpr)
+    in
+    let tokens, typexpr = parse_typexpr_primary tokens in
+    aux typexpr tokens
   and parse_typexpr_tuple tokens =
     let rec aux lhs = function
       | Star :: tokens ->
-          let tokens, rhs = parse_typexpr_primary tokens in
+          let tokens, rhs = parse_typexpr_ctor_app tokens in
           aux (rhs :: lhs) tokens
       | tokens -> (tokens, lhs)
     in
-    let tokens, typexpr = parse_typexpr_primary tokens in
+    let tokens, typexpr = parse_typexpr_ctor_app tokens in
     let tokens, typexprs = aux [typexpr] tokens in
     match typexprs with
     | [] -> raise Unexpected_token
