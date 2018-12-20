@@ -100,6 +100,8 @@ type token =
   | KwString
   | Apostrophe
 
+exception Unexpected_token
+
 let string_of_token = function
   | IntLiteral num -> string_of_int num
   | CharLiteral ch -> "'" ^ String.make 1 ch ^ "'"
@@ -363,6 +365,8 @@ type ast =
 
 and pattern = ast
 
+exception Unexpected_ast
+
 let rec varnames_in_pattern = function
   (* TODO: much faster algorithm? *)
   | UnitValue | IntValue _ | CharValue _ | StringValue _ | EmptyList -> []
@@ -378,9 +382,7 @@ let rec varnames_in_pattern = function
   | PtnAlias (ptn, Var name) -> name :: varnames_in_pattern ptn
   | CtorApp (_, _, None) -> []
   | CtorApp (_, _, Some arg) -> varnames_in_pattern arg
-  | _ -> failwith "unexpected ast"
-
-exception Unexpected_token
+  | _ -> raise Unexpected_ast
 
 let parse tokens =
   let is_primary = function
@@ -1070,7 +1072,7 @@ let analyze ast =
             Hashtbl.add toplevel.ctors_type ctorname typename )
           ctornames ;
         TypeDef (type_param, typename, ctornames)
-    | _ -> failwith "unexpected ast"
+    | _ -> raise Unexpected_ast
   in
   let env =
     { symbols=
@@ -1207,7 +1209,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "push [rdi]" ;
         appstr buf @@ gen_assign_pattern env exp_label arg ;
         Buffer.contents buf
-    | _ -> failwith "unexpected ast"
+    | _ -> raise Unexpected_ast
   in
   let rec gen_assign_pattern_or_raise env ptn =
     let exp_label = make_label () in
@@ -1507,7 +1509,7 @@ let rec generate (letfuncs, strings) =
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;
         "push 0 /* dummy */"
-    | _ -> failwith "unexpected ast"
+    | _ -> raise Unexpected_ast
   in
   let strings_code =
     let buf = Buffer.create 80 in
@@ -1522,7 +1524,7 @@ let rec generate (letfuncs, strings) =
             appfmt buf ".ascii \"%s\"" (escape_string str) ;
             if space <> 0 then appfmt buf ".space %d" space ;
             appfmt buf ".byte %d\n" space
-        | _ -> failwith "unexpected ast")
+        | _ -> raise Unexpected_ast)
       strings ;
     appfmt buf ".text\n" ;
     Buffer.contents buf
