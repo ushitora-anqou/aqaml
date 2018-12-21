@@ -926,3 +926,19 @@ let m = add m "busu" 2 in
 let m = add m "kouji" 1 in
 let m = add m "sibiri" 1 in
 test (find m "busu") (Some 2)
+
+;;
+let a = 3 and b = 4 and c = 5 in
+test ((a * b) - c) 7 ;
+let a = c - a and b = c * a and c = a - (b * c) in
+test ((a * b) - c) 47 ;
+let f x = (a * x) - 4 and a = 5 in
+test (f a) 6
+
+;;
+let rec mem item = function
+  | x :: xs -> if x = item then true else mem item xs
+  | _ -> false
+and length = function _ :: xs -> 1 + length xs | _ -> 0 in
+test (mem 3 [1; 2; 4]) false ;
+test (length ["abc"; "def"]) 2
