@@ -112,6 +112,7 @@ type token =
   | KwString
   | Apostrophe
   | And
+  | Hat
 
 exception Unexpected_token
 
@@ -160,6 +161,7 @@ let string_of_token = function
   | KwString -> "string"
   | Apostrophe -> "'"
   | And -> "and"
+  | Hat -> "^"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -299,6 +301,7 @@ let tokenize program =
       | ']' -> RBracket :: aux i
       | '|' -> Bar :: aux i
       | '.' -> Dot :: aux i
+      | '^' -> Hat :: aux i
       | '-' -> (
           let i, ch = next_char i in
           match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
@@ -352,6 +355,7 @@ type ast =
   | Sub of (ast * ast)
   | Mul of (ast * ast)
   | Div of (ast * ast)
+  | StringConcat of ast * ast
   | Negate of ast
   | Positate of ast
   | StructEqual of (ast * ast)
@@ -490,30 +494,40 @@ let parse tokens =
         let tokens, cdr = parse_cons tokens in
         (tokens, Cons (car, cdr))
     | _ -> (tokens, car)
+  and parse_string_concat tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Hat :: tokens ->
+          let tokens, rhs = parse_cons tokens in
+          aux (StringConcat (lhs, rhs)) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_cons tokens in
+    aux ast tokens
   and parse_structural_equal tokens =
     let rec aux lhs tokens =
       match tokens with
       | Equal :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (StructEqual (lhs, rhs)) tokens
       | LTGT :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (StructInequal (lhs, rhs)) tokens
       | LT :: Equal :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (LessThanEqual (lhs, rhs)) tokens
       | GT :: Equal :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (LessThanEqual (rhs, lhs)) tokens
       | LT :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (LessThan (lhs, rhs)) tokens
       | GT :: tokens ->
-          let tokens, rhs = parse_cons tokens in
+          let tokens, rhs = parse_string_concat tokens in
           aux (LessThan (rhs, lhs)) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_cons tokens in
+    let tokens, ast = parse_string_concat tokens in
     aux ast tokens
   and parse_tuple tokens =
     let rec aux lhs tokens =
@@ -878,6 +892,7 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
+    | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
@@ -1340,6 +1355,15 @@ let rec generate (letfuncs, strings) =
           ; "idiv rdi"
           ; tag_int "rax"
           ; "push rax" ]
+    | StringConcat (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rbx" ;
+        appstr buf "pop rax" ;
+        appstr buf "call aqaml_concat_string" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | Positate ast -> ""
     | Negate ast ->
         let buf = Buffer.create 128 in
@@ -1672,6 +1696,12 @@ let rec generate (letfuncs, strings) =
     appstr buf "test eax, eax" ;
     appstr buf "sete al" ;
     appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_concat_string:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "call aqaml_concat_string_detail@PLT" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_string_length:" ;

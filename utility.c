@@ -98,6 +98,30 @@ void *aqaml_alloc_block(unsigned long size, unsigned long color,
     return (ptr + 1);
 }
 
+unsigned long aqaml_concat_string_detail(unsigned long lhs_src,
+                                         unsigned long rhs_src)
+{
+    unsigned long lhs_len = aqaml_string_length_detail(lhs_src),
+                  rhs_len = aqaml_string_length_detail(rhs_src);
+    AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
+    // assert(lhs.kind == AQAML_STRING && rhs.kind == AQAML_STRING);
+
+    unsigned long ret_src =
+        (unsigned long)aqaml_alloc_block((lhs_len + rhs_len) / 8 + 1, 0, 252);
+    AQamlValue ret = get_value(ret_src);
+    unsigned long space = 7 - (lhs_len + rhs_len) % 8;
+
+    for (unsigned long i = 0; i < lhs_len; i++)
+        ret.string->str[i] = lhs.string->str[i];
+    for (unsigned long i = 0; i < rhs_len; i++)
+        ret.string->str[i + lhs_len] = rhs.string->str[i];
+    for (unsigned long i = 0; i < space; i++)
+        ret.string->str[i + lhs_len + rhs_len] = 0u;
+    ret.string->str[lhs_len + rhs_len + space] = space;
+
+    return ret_src;
+}
+
 unsigned long aqaml_string_length_detail(unsigned long ptr)
 {
     AQamlValue val = get_value(ptr);

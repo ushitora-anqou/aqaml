@@ -942,3 +942,12 @@ let rec mem item = function
 and length = function _ :: xs -> 1 + length xs | _ -> 0 in
 test (mem 3 [1; 2; 4]) false ;
 test (length ["abc"; "def"]) 2
+
+;;
+test ("abc" ^ "") "abc" ;
+test ("abc" ^ "def") "abcdef" ;
+test ("abc" ^ "defghi") "abcdefghi" ;
+test ("abcghi" ^ "def") "abcghidef" ;
+test ("abc" ^ "def" ^ "ghi") "abcdefghi" ;
+let str = "abcdef" in
+test ("<" ^ str ^ ">") "<abcdef>"
