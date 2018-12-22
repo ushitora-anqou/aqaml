@@ -2,6 +2,18 @@ open Printf
 open Scanf
 module HashMap = Map.Make (String)
 
+let rec list_unique lst =
+  let set = Hashtbl.create @@ List.length lst in
+  let rec aux res = function
+    | [] -> res
+    | x :: xs ->
+        if Hashtbl.mem set x then aux res xs
+        else (
+          Hashtbl.add set x () ;
+          aux (x :: res) xs )
+  in
+  aux [] lst
+
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let append_to_list_ref x xs = xs := x :: !xs
@@ -1011,6 +1023,8 @@ let analyze ast =
                       else env_in.symbols ) }
                 in
                 let func = aux env_in func in
+                (* Delete duplicate freevars *)
+                env_in.freevars := list_unique !(env_in.freevars) ;
                 let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
                 if first && recursive && List.length freevars <> 0 then (
                   (* restore toplevel *)
@@ -1034,7 +1048,6 @@ let analyze ast =
                   (* The function don't have to be called as closure, AT LEAST IN THAT FUNCTION ITSELF. *)
                   (env_in, func, freevars)
               in
-              (* TODO: duplicated freevars *)
               let env_in, func, freevars = analyze_func true in
               (* freevars are passed to env if they are not defined in env *)
               List.iter
