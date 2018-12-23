@@ -970,3 +970,9 @@ test (even 2) true ;
 test (even 3) false ;
 test (odd 2) false ;
 test (odd 3) true
+
+;;
+let is_capital = function 'A' .. 'Z' -> true | _ -> false in
+test (is_capital 'B') true ;
+test (is_capital 'd') false ;
+test (is_capital '\n') false

@@ -111,6 +111,7 @@ type token =
   | When
   | Type
   | Dot
+  | DotDot
   | Of
   | KwInt
   | KwChar
@@ -160,6 +161,7 @@ let string_of_token = function
   | When -> "when"
   | Type -> "type"
   | Dot -> "."
+  | DotDot -> ".."
   | Of -> "of"
   | KwInt -> "int"
   | KwChar -> "char"
@@ -305,8 +307,10 @@ let tokenize program =
       | ',' -> Comma :: aux i
       | ']' -> RBracket :: aux i
       | '|' -> Bar :: aux i
-      | '.' -> Dot :: aux i
       | '^' -> Hat :: aux i
+      | '.' -> (
+          let i, ch = next_char i in
+          match ch with '.' -> DotDot :: aux i | _ -> Dot :: aux (i - 1) )
       | '-' -> (
           let i, ch = next_char i in
           match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
@@ -383,11 +387,12 @@ type ast =
   | MatchWith of ast * (pattern * ast option * ast) list
   | MakeCls of string * int * string list
   | Lambda of pattern list * ast
+  | TypeDef of typ option * string * (string * typ option) list
+  | CtorApp of string option * string * ast option
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
-  | TypeDef of typ option * string * (string * typ option) list
-  | CtorApp of string option * string * ast option
+  | PtnRange of char * char
 
 and pattern = ast
 
@@ -395,7 +400,9 @@ exception Unexpected_ast
 
 let rec varnames_in_pattern = function
   (* TODO: much faster algorithm? *)
-  | UnitValue | IntValue _ | CharValue _ | StringValue _ | EmptyList -> []
+  | UnitValue | IntValue _ | CharValue _ | StringValue _ | EmptyList
+   |PtnRange _ ->
+      []
   | Var varname -> [varname]
   | Cons (car, cdr) ->
       List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
@@ -403,11 +410,11 @@ let rec varnames_in_pattern = function
       List.fold_left
         (fun a b -> List.rev_append a (varnames_in_pattern b))
         [] values
+  | CtorApp (_, _, None) -> []
+  | CtorApp (_, _, Some arg) -> varnames_in_pattern arg
   | PtnOr (lhs, rhs) ->
       List.rev_append (varnames_in_pattern lhs) (varnames_in_pattern rhs)
   | PtnAlias (ptn, Var name) -> name :: varnames_in_pattern ptn
-  | CtorApp (_, _, None) -> []
-  | CtorApp (_, _, Some arg) -> varnames_in_pattern arg
   | _ -> raise Unexpected_ast
 
 let parse tokens =
@@ -687,11 +694,15 @@ let parse tokens =
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
+  and parse_pattern_range = function
+    | CharLiteral st :: DotDot :: CharLiteral ed :: tokens ->
+        (tokens, PtnRange (st, ed))
+    | tokens -> parse_pattern_primary tokens
   and parse_pattern_ctor_app tokens =
-    let tokens, ctorapp = parse_pattern_primary tokens in
+    let tokens, ctorapp = parse_pattern_range tokens in
     match ctorapp with
     | CtorApp (None, ctorname, None) when is_primary tokens ->
-        let tokens, arg = parse_pattern_primary tokens in
+        let tokens, arg = parse_pattern_range tokens in
         (tokens, CtorApp (None, ctorname, Some arg))
     | _ -> (tokens, ctorapp)
   and parse_pattern_cons tokens =
@@ -867,7 +878,7 @@ let analyze ast =
   in
   let rec aux_ptn env ptn =
     match ptn with
-    | IntValue _ | CharValue _ | UnitValue | EmptyList -> ptn
+    | IntValue _ | CharValue _ | UnitValue | EmptyList | PtnRange _ -> ptn
     | StringValue _ ->
         append_to_list_ref ptn toplevel.strings ;
         ptn
@@ -1264,6 +1275,24 @@ let rec generate (letfuncs, strings) =
           ; String.concat "\n"
               (List.map (gen_assign_pattern env exp_label) (List.rev values))
           ]
+    | CtorApp (Some typename, ctorname, None) ->
+        gen_assign_pattern env exp_label
+        @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
+    | CtorApp (Some typename, ctorname, Some arg) ->
+        let buf = Buffer.create 128 in
+        let id = Hashtbl.find ctors_id (typename, ctorname) in
+        appfmt buf "pop rax" ;
+        appstr buf "mov rdi, rax" ;
+        appstr buf "and rax, 1" ;
+        appstr buf "cmp rax, 0" ;
+        appfmt buf "jne %s" exp_label ;
+        appstr buf "mov rax, [rdi - 8]" ;
+        appstr buf "and rax, 0xff" ;
+        appfmt buf "cmp rax, %d" id ;
+        appfmt buf "jne %s" exp_label ;
+        appstr buf "push [rdi]" ;
+        appstr buf @@ gen_assign_pattern env exp_label arg ;
+        Buffer.contents buf
     | PtnAlias (ptn, Var varname) ->
         let buf = Buffer.create 128 in
         let offset = HashMap.find varname env.varoffset in
@@ -1291,23 +1320,19 @@ let rec generate (letfuncs, strings) =
         appstr buf @@ gen_assign_pattern env exp_label rhs ;
         appfmt buf "%s:" exit_label ;
         Buffer.contents buf
-    | CtorApp (Some typename, ctorname, None) ->
-        gen_assign_pattern env exp_label
-        @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
-    | CtorApp (Some typename, ctorname, Some arg) ->
+    | PtnRange (bg, ed) ->
         let buf = Buffer.create 128 in
-        let id = Hashtbl.find ctors_id (typename, ctorname) in
-        appfmt buf "pop rax" ;
-        appstr buf "mov rdi, rax" ;
-        appstr buf "and rax, 1" ;
-        appstr buf "cmp rax, 0" ;
-        appfmt buf "jne %s" exp_label ;
-        appstr buf "mov rax, [rdi - 8]" ;
-        appstr buf "and rax, 0xff" ;
-        appfmt buf "cmp rax, %d" id ;
-        appfmt buf "jne %s" exp_label ;
-        appstr buf "push [rdi]" ;
-        appstr buf @@ gen_assign_pattern env exp_label arg ;
+        let exit0_label = make_label () in
+        let exit1_label = make_label () in
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int @@ Char.code bg ;
+        appfmt buf "jge %s" exit0_label ;
+        appfmt buf "jmp %s" exp_label ;
+        appfmt buf "%s:" exit0_label ;
+        appfmt buf "cmp rax, %d" @@ tagged_int @@ Char.code ed ;
+        appfmt buf "jle %s" exit1_label ;
+        appfmt buf "jmp %s" exp_label ;
+        appfmt buf "%s:" exit1_label ;
         Buffer.contents buf
     | _ -> raise Unexpected_ast
   in
