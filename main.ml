@@ -2,6 +2,11 @@ open Printf
 open Scanf
 module HashMap = Map.Make (String)
 
+let filter_after_map f lst =
+  List.map (function Some x -> x | None -> failwith "invalid op")
+  @@ List.filter (function Some x -> true | None -> false)
+  @@ List.map f lst
+
 let rec list_unique lst =
   let set = Hashtbl.create @@ List.length lst in
   let rec aux res = function
@@ -843,6 +848,9 @@ type type_toplevel =
   ; strings: ast list ref
   ; ctors_type: (string, string) Hashtbl.t }
 
+(* Used in analysis of LetAnd *)
+exception Should_be_closure
+
 let analyze ast =
   let toplevel =
     {letfuncs= ref []; strings= ref []; ctors_type= Hashtbl.create 16}
@@ -982,11 +990,15 @@ let analyze ast =
         failwith (sprintf "not found in analysis (AppCls): %s" funcname) )
     | AppCls (func, args) -> AppCls (aux env func, List.map (aux env) args)
     | LetAnd (recursive, lhs_of_in, rhs_of_in) ->
-        let rec aux' env' = function
-          | LetVar (recursive, bind, lhs) ->
-              if recursive then
-                (* When recursive, LetVar should be LetFunc with no arguments. *)
-                (* TODO:
+        (* Split rhs_of_eq into LetVar and LetFunc. At the same time,
+         * make a conversion table for function names *)
+        let funcnames2gen = Hashtbl.create 2 in
+        let src =
+          List.map
+            (function
+              | [Var funcname], rhs_of_eq when recursive ->
+                  (* When recursive, LetVar should be LetFunc with no arguments. *)
+                  (* TODO:
                     If the lhs doesn't have any freevars, then there is no need to convert it.
                     Also, we should check whether the lhs uses itself in a correct way e.g.
                         let rec length = function x :: xs -> 1 + length xs | [] -> 0;;
@@ -994,141 +1006,174 @@ let analyze ast =
                         let rec id x = id;;
                     is ng. For now, we assume that 'let rec ...' expression is written properly.
                   *)
-                aux' env'
-                  (LetFunc
-                     ( recursive
-                     , ( match bind with
-                       | Var funcname -> funcname
-                       | _ ->
-                           failwith
-                             "when recursive only Var is allowed in 'let'" )
-                     , []
-                     , lhs
-                     , [] ))
-              else
+                  Hashtbl.add funcnames2gen funcname (make_id funcname) ;
+                  LetFunc (true, funcname, [], rhs_of_eq, [])
+              | [bind], rhs_of_eq -> LetVar (recursive, bind, rhs_of_eq)
+              | Var funcname :: args, rhs_of_eq ->
+                  Hashtbl.add funcnames2gen funcname (make_id funcname) ;
+                  LetFunc (recursive, funcname, args, rhs_of_eq, [])
+              | _ -> failwith "unexpected ast")
+            lhs_of_in
+        in
+        (* Now, analyze all LetVar/LetFunc.
+         * When we analyze *recursive* LetFunc, we must decide whether
+         * we should call this function by name or as closure in itself.
+         * Therefore, first, we assume that we can call them by name i.e. we use FuncVar.
+         * Next, if we find we can't do so (i.e. there are any freevars), we decide to call them as closure,
+         * that is, use Var, and analyze it again.
+         * I (ushitora-anqou) 'pakutta' or borrowed this idea from MinCaml.
+         * TODO: is there better way?*)
+        let let_closures_freevars = ref [] in
+        let should_be_closure = ref false in
+        let rec analyze_lets first =
+          let toplevel_backup = toplevel in
+          let funcvars =
+            hashmap_of_list
+            @@ filter_after_map
+                 (function
+                   | LetFunc (_, funcname, args, _, _) ->
+                       let gen_funcname =
+                         Hashtbl.find funcnames2gen funcname
+                       in
+                       Some
+                         ( if first then
+                           (funcname, FuncVar (gen_funcname, List.length args))
+                         else (funcname, Var gen_funcname) )
+                   | _ -> None)
+                 src
+          in
+          let rec aux' env' = function
+            | LetVar (false, bind, lhs) ->
                 let env' =
                   {env' with symbols= add_symbols_in_pattern env'.symbols bind}
                 in
                 (env', LetVar (false, aux_ptn env' bind, aux env lhs))
-          | LetFunc (recursive, funcname, args, func, _) ->
-              let toplevel_backup = toplevel in
-              let gen_funcname = make_id funcname in
-              let rec analyze_func first =
-                let funcvar =
-                  (* Try FuncVar first, that is, at first
-                     * we try to call this function by name.
-                     * That means we assume that the function is not recursive,
-                     * or recursive and has no freevars.
-                     * If we find we can't,
-                     * then Var is used, which means it should be called as closure *)
-                  if first then FuncVar (gen_funcname, List.length args)
-                  else Var gen_funcname
-                in
+            | LetFunc (recursive, funcname, args, func, _) ->
+                let gen_funcname = Hashtbl.find funcnames2gen funcname in
                 let env_in =
                   { symbols= add_symbols_in_patterns HashMap.empty args
                   ; parent= Some env
                   ; freevars= ref [] }
                 in
-                (* if recursive then funcname should be in env *)
+                (* if recursive then funcname(s) should be in env *)
                 let env_in =
-                  { env_in with
-                    symbols=
-                      ( if recursive then
-                        HashMap.add funcname funcvar env_in.symbols
-                      else env_in.symbols ) }
+                  if not recursive then env_in
+                  else {env_in with symbols= integrate env_in.symbols funcvars}
                 in
                 let func = aux env_in func in
                 (* Delete duplicate freevars *)
                 env_in.freevars := list_unique !(env_in.freevars) ;
-                let freevars = List.map (fun (_, a) -> a) !(env_in.freevars) in
-                if first && recursive && List.length freevars <> 0 then (
-                  (* restore toplevel *)
-                  (* TODO: is there any better way? *)
-                  toplevel.letfuncs := !(toplevel_backup.letfuncs) ;
-                  toplevel.strings := !(toplevel_backup.strings) ;
-                  analyze_func false )
-                else if not first then
-                  (* The function that is recursive and has freevars should be called as closure
-                     * IN THAT FUNCTION ITSELF. (Of course outside too, but here that's not important. *)
-                  ( env_in
-                  , LetAndAnalyzed
-                      ( [ LetVar
-                            ( false
-                            , funcvar
-                            , MakeCls (gen_funcname, List.length args, freevars)
-                            ) ]
-                      , func )
-                  , freevars )
+                let freevars =
+                  ref (List.map (fun (_, a) -> a) !(env_in.freevars))
+                in
+                (* Save data for the possible second loop *)
+                if first then
+                  let_closures_freevars := !freevars @ !let_closures_freevars ;
+                (* If the function is recursive and should call itself as a closure,
+                 * then Var should be used rather than FuncVar *)
+                if
+                  (not !should_be_closure) && first && recursive
+                  && List.length !freevars <> 0
+                then should_be_closure := true ;
+                if first && !should_be_closure then raise Should_be_closure ;
+                let func =
+                  if first then func
+                  else (
+                    (* In the target function, all functions chained with keyword 'and' should be available.
+                     * This means that they should be defined as closures at the head of the target function.
+                     * Note that these closures should have *all* freevars in chained functions. *)
+                    (* TODO: only functions appeared in freevars need to be available. *)
+                    freevars := !let_closures_freevars ;
+                    LetAndAnalyzed
+                      ( filter_after_map
+                          (function
+                            | LetFunc (_, funcname, args, _, _) ->
+                                let gen_funcname =
+                                  Hashtbl.find funcnames2gen funcname
+                                in
+                                Some
+                                  (LetVar
+                                     ( false
+                                     , Var gen_funcname
+                                     , MakeCls
+                                         ( gen_funcname
+                                         , List.length args
+                                         , !let_closures_freevars ) ))
+                            | _ -> None)
+                          src
+                      , func ) )
+                in
+                (* freevars are passed to env if they are not defined in env *)
+                List.iter
+                  (fun ((name, _) as var) ->
+                    let d, _ = find_symbol env name in
+                    if d <> 0 then env.freevars := var :: !(env.freevars) )
+                  !(env_in.freevars) ;
+                if List.length !freevars = 0 then (
+                  (* no freevars; no need for closure *)
+                  let env_out =
+                    { env' with
+                      symbols=
+                        HashMap.add funcname
+                          (FuncVar (gen_funcname, List.length args))
+                          env'.symbols }
+                  in
+                  let ast =
+                    LetFunc
+                      ( recursive
+                      , gen_funcname
+                      , List.map (aux_ptn env_in) args
+                      , func
+                      , !freevars )
+                  in
+                  append_to_list_ref ast toplevel.letfuncs ;
+                  (env_out, ast) )
                 else
-                  (* The function don't have to be called as closure, AT LEAST IN THAT FUNCTION ITSELF. *)
-                  (env_in, func, freevars)
-              in
-              let env_in, func, freevars = analyze_func true in
-              (* freevars are passed to env if they are not defined in env *)
-              List.iter
-                (fun ((name, _) as var) ->
-                  let d, _ = find_symbol env name in
-                  if d <> 0 then env.freevars := var :: !(env.freevars) )
-                !(env_in.freevars) ;
-              if List.length freevars = 0 then (
-                (* no freevars; no need for closure *)
-                let env_out =
-                  { env' with
-                    symbols=
-                      HashMap.add funcname
-                        (FuncVar (gen_funcname, List.length args))
-                        env'.symbols }
-                in
-                let ast =
-                  LetFunc
-                    ( recursive
-                    , gen_funcname
-                    , List.map (aux_ptn env_in) args
-                    , func
-                    , freevars )
-                in
-                append_to_list_ref ast toplevel.letfuncs ;
-                (env_out, ast) )
-              else
-                (* closure *)
-                let funcvar = Var gen_funcname in
-                let env_out =
-                  {env' with symbols= HashMap.add funcname funcvar env'.symbols}
-                in
-                let ast =
-                  LetFunc
-                    ( recursive
-                    , gen_funcname
-                    , List.map (aux_ptn env_in) args
-                    , func
-                    , freevars )
-                in
-                append_to_list_ref ast toplevel.letfuncs ;
-                ( env_out
-                , LetVar
-                    ( false
-                    , funcvar
-                    , MakeCls (gen_funcname, List.length args, freevars) ) )
-          | _ -> raise Unexpected_ast
-        in
-        let env', lets =
-          List.fold_left
-            (fun (env', lets) le ->
-              match le with
-              | [bind], lhs ->
-                  let env', le_analyzed =
-                    aux' env' @@ LetVar (recursive, bind, lhs)
+                  (* closure *)
+                  let funcvar = Var gen_funcname in
+                  let env_out =
+                    { env' with
+                      symbols= HashMap.add funcname funcvar env'.symbols }
                   in
-                  (env', le_analyzed :: lets)
-              | Var funcname :: args, lhs ->
-                  let env', le_analyzed =
-                    aux' env' @@ LetFunc (recursive, funcname, args, lhs, [])
+                  let ast =
+                    LetFunc
+                      ( recursive
+                      , gen_funcname
+                      , List.map (aux_ptn env_in) args
+                      , func
+                      , !freevars )
                   in
-                  (env', le_analyzed :: lets)
-              | _ -> failwith "unexpected ast (not implemented)" )
-            (env, []) lhs_of_in
+                  append_to_list_ref ast toplevel.letfuncs ;
+                  ( env_out
+                  , LetVar
+                      ( false
+                      , funcvar
+                      , MakeCls (gen_funcname, List.length args, !freevars) )
+                  )
+            | _ -> raise Unexpected_ast
+          in
+          let env', lets =
+            List.fold_left
+              (fun (env', lets) le ->
+                try
+                  match le with
+                  | LetVar _ ->
+                      let env', le_analyzed = aux' env' le in
+                      (env', le_analyzed :: lets)
+                  | LetFunc _ ->
+                      let env', le_analyzed = aux' env' le in
+                      (env', le_analyzed :: lets)
+                  | _ -> failwith "unexpected ast"
+                with Should_be_closure when first -> (env', lets) )
+              (env, []) src
+          in
+          if first && !should_be_closure then (
+            toplevel.letfuncs := !(toplevel_backup.letfuncs) ;
+            toplevel.strings := !(toplevel_backup.strings) ;
+            analyze_lets false )
+          else LetAndAnalyzed (lets, aux env' rhs_of_in)
         in
-        LetAndAnalyzed (lets, aux env' rhs_of_in)
+        analyze_lets true
     | _ -> raise Unexpected_ast
   in
   let env =
@@ -1613,14 +1658,6 @@ let rec generate (letfuncs, strings) =
                      integrate HashMap.empty @@ hashmap_of_list
                      @@ List.mapi (fun i arg -> (arg, -8 * (i + 1))) varnames
                  }
-               in
-               (* if recursive then the function itself should be in env *)
-               let env =
-                 if recursive then
-                   let offset = env.offset - 8 in
-                   { offset
-                   ; varoffset= HashMap.add funcname offset env.varoffset }
-                 else env
                in
                (* if closured then freevars are stored on the stack *)
                let env =

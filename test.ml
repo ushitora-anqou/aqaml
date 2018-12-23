@@ -951,3 +951,22 @@ test ("abcghi" ^ "def") "abcghidef" ;
 test ("abc" ^ "def" ^ "ghi") "abcdefghi" ;
 let str = "abcdef" in
 test ("<" ^ str ^ ">") "<abcdef>"
+
+;;
+let rec even = function 0 -> true | x -> odd (x - 1)
+and odd = function 0 -> false | x -> even (x - 1) in
+test (even 2) true ;
+test (even 3) false ;
+test (odd 2) false ;
+test (odd 3) true
+
+;;
+let t = true and f = false in
+(*let rec even = function 0 -> t | x -> odd (x - 1)
+and odd = function 0 -> f | x -> even (x - 1) in*)
+let rec odd = function 0 -> f | x -> even (x - 1)
+and even = function 0 -> t | x -> odd (x - 1) in
+test (even 2) true ;
+test (even 3) false ;
+test (odd 2) false ;
+test (odd 3) true
