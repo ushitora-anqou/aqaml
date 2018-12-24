@@ -1077,16 +1077,14 @@ let analyze ast =
                 let freevars =
                   ref (List.map (fun (_, a) -> a) !(env_in.freevars))
                 in
-                (* Save data for the possible second loop *)
-                if first then
+                if first then (
+                  (* Save data for the possible second loop *)
                   let_closures_freevars := !freevars @ !let_closures_freevars ;
-                (* If the function is recursive and should call itself as a closure,
-                 * then Var should be used rather than FuncVar *)
-                if
-                  (not !should_be_closure) && first && recursive
-                  && List.length !freevars <> 0
-                then should_be_closure := true ;
-                if first && !should_be_closure then raise Should_be_closure ;
+                  (* If the function is recursive and should call itself as a closure,
+                   * then Var should be used rather than FuncVar *)
+                  if recursive && List.length !freevars <> 0 then
+                    should_be_closure := true ;
+                  if !should_be_closure then raise Should_be_closure ) ;
                 let func =
                   if first then func
                   else (
@@ -1135,7 +1133,7 @@ let analyze ast =
                       , gen_funcname
                       , List.map (aux_ptn env_in) args
                       , func
-                      , !freevars )
+                      , [] )
                   in
                   append_to_list_ref ast toplevel.letfuncs ;
                   (env_out, ast) )
@@ -1181,6 +1179,7 @@ let analyze ast =
           if first && !should_be_closure then (
             toplevel.letfuncs := !(toplevel_backup.letfuncs) ;
             toplevel.strings := !(toplevel_backup.strings) ;
+            let_closures_freevars := list_unique !let_closures_freevars ;
             analyze_lets false )
           else LetAndAnalyzed (lets, aux env' rhs_of_in)
         in
