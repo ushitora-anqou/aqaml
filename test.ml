@@ -976,3 +976,12 @@ let is_capital = function 'A' .. 'Z' -> true | _ -> false in
 test (is_capital 'B') true ;
 test (is_capital 'd') false ;
 test (is_capital '\n') false
+
+;;
+test ([] @ []) [] ;
+test ([1; 2] @ []) [1; 2] ;
+test ([] @ [1; 2]) [1; 2] ;
+test ([1; 2; 3] @ [4; 5; 6]) [1; 2; 3; 4; 5; 6] ;
+let f () = [1; 2; 3] in
+let g () = [4; 5; 6] in
+test (f () @ g ()) [1; 2; 3; 4; 5; 6]

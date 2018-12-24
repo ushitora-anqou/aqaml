@@ -136,3 +136,22 @@ void aqaml_print_string_detail(uint64_t ptr)
     for (uint64_t i = 0; i < length; i++) putchar(val.string->str[i]);
 }
 
+uint64_t aqaml_concat_list_detail(uint64_t lhs_src, uint64_t rhs_src)
+{
+    AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
+
+    if (lhs.kind == AQAML_INTEGER)  // lhs is an empty list.
+        return rhs_src;
+    if (rhs.kind == AQAML_INTEGER)  // rhs is an empty list
+        return lhs_src;
+
+    assert(lhs.kind == AQAML_ARRAY && rhs.kind == AQAML_ARRAY);
+
+    // Find the last block of lhs.
+    while (lhs.array->data[1] != 1u) lhs = get_value(lhs.array->data[1]);
+
+    // Concat the lists.
+    lhs.array->data[1] = rhs_src;
+
+    return lhs_src;
+}

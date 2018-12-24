@@ -119,6 +119,7 @@ type token =
   | Apostrophe
   | And
   | Hat
+  | Naruto
 
 exception Unexpected_token
 
@@ -169,6 +170,7 @@ let string_of_token = function
   | Apostrophe -> "'"
   | And -> "and"
   | Hat -> "^"
+  | Naruto -> "@"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -308,6 +310,7 @@ let tokenize program =
       | ']' -> RBracket :: aux i
       | '|' -> Bar :: aux i
       | '^' -> Hat :: aux i
+      | '@' -> Naruto :: aux i
       | '.' -> (
           let i, ch = next_char i in
           match ch with '.' -> DotDot :: aux i | _ -> Dot :: aux (i - 1) )
@@ -365,6 +368,7 @@ type ast =
   | Mul of (ast * ast)
   | Div of (ast * ast)
   | StringConcat of ast * ast
+  | ListConcat of ast * ast
   | Negate of ast
   | Positate of ast
   | StructEqual of (ast * ast)
@@ -512,6 +516,9 @@ let parse tokens =
       | Hat :: tokens ->
           let tokens, rhs = parse_cons tokens in
           aux (StringConcat (lhs, rhs)) tokens
+      | Naruto :: tokens ->
+          let tokens, rhs = parse_cons tokens in
+          aux (ListConcat (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
     in
     let tokens, ast = parse_cons tokens in
@@ -912,6 +919,7 @@ let analyze ast =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
+    | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
@@ -1433,6 +1441,15 @@ let rec generate (letfuncs, strings) =
         appstr buf "call aqaml_concat_string" ;
         appstr buf "push rax" ;
         Buffer.contents buf
+    | ListConcat (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rbx" ;
+        appstr buf "pop rax" ;
+        appstr buf "call aqaml_concat_list" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | Positate ast -> ""
     | Negate ast ->
         let buf = Buffer.create 128 in
@@ -1763,6 +1780,12 @@ let rec generate (letfuncs, strings) =
     appstr buf "mov rdi, rax" ;
     appstr buf "mov rsi, rbx" ;
     appstr buf "call aqaml_concat_string_detail@PLT" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_concat_list:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "call aqaml_concat_list_detail@PLT" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_string_length:" ;
