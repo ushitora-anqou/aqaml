@@ -120,6 +120,8 @@ type token =
   | And
   | Hat
   | Naruto
+  | ColonEqual
+  | Exclam
 
 exception Unexpected_token
 
@@ -171,6 +173,8 @@ let string_of_token = function
   | And -> "and"
   | Hat -> "^"
   | Naruto -> "@"
+  | ColonEqual -> ":="
+  | Exclam -> "!"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -311,6 +315,7 @@ let tokenize program =
       | '|' -> Bar :: aux i
       | '^' -> Hat :: aux i
       | '@' -> Naruto :: aux i
+      | '!' -> Exclam :: aux i
       | '.' -> (
           let i, ch = next_char i in
           match ch with '.' -> DotDot :: aux i | _ -> Dot :: aux (i - 1) )
@@ -329,6 +334,7 @@ let tokenize program =
           let i, ch = next_char i in
           match ch with
           | ':' -> ColonColon :: aux i
+          | '=' -> ColonEqual :: aux i
           | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
       | ';' -> (
           let i, ch = next_char i in
@@ -393,6 +399,8 @@ type ast =
   | Lambda of pattern list * ast
   | TypeDef of typ option * string * (string * typ option) list
   | CtorApp of string option * string * ast option
+  | RefAssign of ast * ast
+  | Deref of ast
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -429,6 +437,9 @@ let parse tokens =
         true
     | _ -> false
   in
+  let is_prefix tokens =
+    is_primary tokens || match tokens with Exclam :: _ -> true | _ -> false
+  in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | CharLiteral ch :: tokens -> (tokens, CharValue ch)
@@ -457,15 +468,20 @@ let parse tokens =
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
+  and parse_prefix = function
+    | Exclam :: tokens ->
+        let tokens, ast = parse_primary tokens in
+        (tokens, Deref ast)
+    | tokens -> parse_primary tokens
   and parse_funccall tokens =
     let rec aux tokens =
-      if is_primary tokens then
-        let tokens, arg = parse_primary tokens in
+      if is_prefix tokens then
+        let tokens, arg = parse_prefix tokens in
         let tokens, args = aux tokens in
         (tokens, arg :: args)
       else (tokens, [])
     in
-    let tokens, func = parse_primary tokens in
+    let tokens, func = parse_prefix tokens in
     let tokens, args = aux tokens in
     if args = [] then (tokens, func) (* not function call *)
     else (tokens, AppCls (func, args))
@@ -562,6 +578,13 @@ let parse tokens =
     | [] -> raise Unexpected_token
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
+  and parse_assignment tokens =
+    let tokens, lhs = parse_tuple tokens in
+    match tokens with
+    | ColonEqual :: tokens ->
+        let tokens, rhs = parse_let tokens in
+        (tokens, RefAssign (lhs, rhs))
+    | _ -> (tokens, lhs)
   and parse_if = function
     | If :: tokens -> (
         let tokens, cond = parse_expression tokens in
@@ -574,7 +597,7 @@ let parse tokens =
                 (tokens, IfThenElse (cond, then_body, Some else_body))
             | _ -> (tokens, IfThenElse (cond, then_body, None)) )
         | _ -> raise Unexpected_token )
-    | tokens -> parse_tuple tokens
+    | tokens -> parse_assignment tokens
   and parse_pattern_match tokens =
     let rec aux first cases tokens =
       let aux' tokens =
@@ -920,6 +943,8 @@ let analyze ast =
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
+    | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
+    | Deref ast -> Deref (aux env ast)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
     | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
@@ -1199,7 +1224,8 @@ let analyze ast =
         hashmap_of_list
         @@ [ ("String.length", FuncVar ("aqaml_string_length", 1))
            ; ("print_string", FuncVar ("aqaml_print_string", 1))
-           ; ("exit", FuncVar ("aqaml_exit", 1)) ]
+           ; ("exit", FuncVar ("aqaml_exit", 1))
+           ; ("ref", FuncVar ("aqaml_ref", 1)) ]
     ; parent= None
     ; freevars= ref [] }
   in
@@ -1449,6 +1475,22 @@ let rec generate (letfuncs, strings) =
         appstr buf "pop rax" ;
         appstr buf "call aqaml_concat_list" ;
         appstr buf "push rax" ;
+        Buffer.contents buf
+    | RefAssign (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rbx" ;
+        appstr buf "pop rax" ;
+        appstr buf "mov [rax], rbx" ;
+        (* push unit value *)
+        appstr buf "push 1" ;
+        Buffer.contents buf
+    | Deref ast ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env ast ;
+        appstr buf "pop rax" ;
+        appstr buf "push [rax]" ;
         Buffer.contents buf
     | Positate ast -> ""
     | Negate ast ->
@@ -1805,6 +1847,12 @@ let rec generate (letfuncs, strings) =
     appstr buf "mov rdi, rax" ;
     appstr buf "shr rdi, 1" ;
     appstr buf "call exit@PLT" ;
+    appstr buf "" ;
+    appstr buf "aqaml_ref:" ;
+    appstr buf "mov rbx, rax" ;
+    appstr buf @@ gen_alloc_block 1 0 0 ;
+    appstr buf "mov [rax], rbx" ;
+    appstr buf "ret" ;
     appstr buf "" ;
     for nargs = 1 to 9 do
       let label_loop = make_label () in
