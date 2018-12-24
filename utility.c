@@ -1,6 +1,7 @@
 // For x86-64
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,34 +14,34 @@ typedef struct AQamlValue {
     } kind;
 
     union {
-        unsigned long integer;
+        uint64_t integer;
 
         struct {
-            unsigned long header;
-            unsigned long data[];
+            uint64_t header;
+            uint64_t data[];
         } * array;
 
         struct {
-            unsigned long header;
-            unsigned char str[];
+            uint64_t header;
+            uint8_t str[];
         } * string;
     };
 } AQamlValue;
 
-unsigned long aqaml_string_length_detail(unsigned long ptr);
+uint64_t aqaml_string_length_detail(uint64_t ptr);
 
-void *aqaml_malloc_detail(unsigned int size)
+void *aqaml_malloc_detail(uint32_t size)
 {
     return malloc(size);
 }
 
-AQamlValue get_value(unsigned long src)
+AQamlValue get_value(uint64_t src)
 {
     if ((src & 1) == 1)
         return (AQamlValue){.kind = AQAML_INTEGER, .integer = src};
 
     AQamlValue val = {.integer = src - 8};
-    unsigned int tag = val.array->header & 0xff;
+    uint32_t tag = val.array->header & 0xff;
     switch (tag) {
     case 0 ... 250:  // below No_scan_tag
         val.kind = AQAML_ARRAY;
@@ -51,12 +52,11 @@ AQamlValue get_value(unsigned long src)
         return val;
     }
 
-    fprintf(stderr, "%u\n", (unsigned int)(val.array->header & 0xffffffff));
+    fprintf(stderr, "%u\n", (uint32_t)(val.array->header & 0xffffffff));
     assert(0);
 }
 
-unsigned int aqaml_structural_equal_detail(unsigned long lhs_src,
-                                           unsigned long rhs_src)
+uint32_t aqaml_structural_equal_detail(uint64_t lhs_src, uint64_t rhs_src)
 {
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
 
@@ -67,17 +67,16 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs_src,
         return lhs.integer == rhs.integer;
 
     case AQAML_ARRAY: {
-        unsigned long size = lhs.array->header >> 10;
-        for (int i = 0; i < size; i++) {
-            unsigned long lhs_src = lhs.array->data[i],
-                          rhs_src = rhs.array->data[i];
+        uint64_t size = lhs.array->header >> 10;
+        for (uint32_t i = 0; i < size; i++) {
+            uint64_t lhs_src = lhs.array->data[i], rhs_src = rhs.array->data[i];
             if (aqaml_structural_equal_detail(lhs_src, rhs_src) == 0) return 0;
         }
     } break;
 
     case AQAML_STRING: {
-        unsigned long lhs_size = aqaml_string_length_detail(lhs_src),
-                      rhs_size = aqaml_string_length_detail(rhs_src);
+        uint64_t lhs_size = aqaml_string_length_detail(lhs_src),
+                 rhs_size = aqaml_string_length_detail(rhs_src);
         if (lhs_size != rhs_size) return 0;
         return memcmp(lhs.string->str, rhs.string->str, lhs_size) == 0;
     } break;
@@ -89,53 +88,51 @@ unsigned int aqaml_structural_equal_detail(unsigned long lhs_src,
     return 1;
 }
 
-void *aqaml_alloc_block(unsigned long size, unsigned long color,
-                        unsigned long tag)
+uint64_t aqaml_alloc_block(uint64_t size, uint64_t color, uint64_t tag)
 {
-    unsigned long *ptr = aqaml_malloc_detail((size + 1) * 8);
+    uint64_t *ptr = aqaml_malloc_detail((size + 1) * 8);
     // size in word (54 bits) | color (2 bits) | tag byte (8 bits)
     *ptr = (size << 10) | (color << 8) | tag;
-    return (ptr + 1);
+    return (uint64_t)(ptr + 1);
 }
 
-unsigned long aqaml_concat_string_detail(unsigned long lhs_src,
-                                         unsigned long rhs_src)
+uint64_t aqaml_concat_string_detail(uint64_t lhs_src, uint64_t rhs_src)
 {
-    unsigned long lhs_len = aqaml_string_length_detail(lhs_src),
-                  rhs_len = aqaml_string_length_detail(rhs_src);
+    uint64_t lhs_len = aqaml_string_length_detail(lhs_src),
+             rhs_len = aqaml_string_length_detail(rhs_src);
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
     // assert(lhs.kind == AQAML_STRING && rhs.kind == AQAML_STRING);
 
-    unsigned long ret_src =
-        (unsigned long)aqaml_alloc_block((lhs_len + rhs_len) / 8 + 1, 0, 252);
+    uint64_t ret_src = aqaml_alloc_block((lhs_len + rhs_len) / 8 + 1, 0, 252);
     AQamlValue ret = get_value(ret_src);
-    unsigned long space = 7 - (lhs_len + rhs_len) % 8;
+    uint64_t space = 7 - (lhs_len + rhs_len) % 8;
 
-    for (unsigned long i = 0; i < lhs_len; i++)
+    for (uint64_t i = 0; i < lhs_len; i++)
         ret.string->str[i] = lhs.string->str[i];
-    for (unsigned long i = 0; i < rhs_len; i++)
+    for (uint64_t i = 0; i < rhs_len; i++)
         ret.string->str[i + lhs_len] = rhs.string->str[i];
-    for (unsigned long i = 0; i < space; i++)
+    for (uint64_t i = 0; i < space; i++)
         ret.string->str[i + lhs_len + rhs_len] = 0u;
     ret.string->str[lhs_len + rhs_len + space] = space;
 
     return ret_src;
 }
 
-unsigned long aqaml_string_length_detail(unsigned long ptr)
+uint64_t aqaml_string_length_detail(uint64_t ptr)
 {
     AQamlValue val = get_value(ptr);
     assert(val.kind == AQAML_STRING);
-    unsigned long length = (val.string->header >> 10) * 8 - 1;
+    uint64_t length = (val.string->header >> 10) * 8 - 1;
     length -= val.string->str[length];
     return length;
 }
 
-void aqaml_print_string_detail(unsigned long ptr)
+void aqaml_print_string_detail(uint64_t ptr)
 {
     AQamlValue val = get_value(ptr);
     assert(val.kind == AQAML_STRING);
-    unsigned long length = aqaml_string_length_detail(ptr);
+    uint64_t length = aqaml_string_length_detail(ptr);
 
-    for (unsigned long i = 0; i < length; i++) putchar(val.string->str[i]);
+    for (uint64_t i = 0; i < length; i++) putchar(val.string->str[i]);
 }
+
