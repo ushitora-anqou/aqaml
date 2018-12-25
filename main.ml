@@ -122,6 +122,7 @@ type token =
   | Naruto
   | ColonEqual
   | Exclam
+  | Try
 
 exception Unexpected_token
 
@@ -175,6 +176,7 @@ let string_of_token = function
   | Naruto -> "@"
   | ColonEqual -> ":="
   | Exclam -> "!"
+  | Try -> "try"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -302,6 +304,7 @@ let tokenize program =
           | "char" -> KwChar
           | "string" -> KwString
           | "and" -> And
+          | "try" -> Try
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -401,6 +404,9 @@ type ast =
   | CtorApp of string option * string * ast option
   | RefAssign of ast * ast
   | Deref of ast
+  | ExpDef of string * typ option
+  | ExpPreDef of string * typ option
+  | TryWith of ast * (pattern * ast option * ast) list
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -643,6 +649,13 @@ let parse tokens =
         | With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, MatchWith (cond, cases))
+        | _ -> raise Unexpected_token )
+    | Try :: tokens -> (
+        let tokens, cond = parse_expression tokens in
+        match tokens with
+        | With :: tokens ->
+            let tokens, cases = parse_pattern_match tokens in
+            (tokens, TryWith (cond, cases))
         | _ -> raise Unexpected_token )
     | Let :: tokens ->
         let parse_let_binding tokens =
@@ -887,14 +900,18 @@ let add_symbols_in_patterns symbols ptns =
 type type_toplevel =
   { letfuncs: ast list ref
   ; strings: ast list ref
-  ; ctors_type: (string, string) Hashtbl.t }
+  ; ctors_type: (string, string) Hashtbl.t
+  ; exps: (string, string) Hashtbl.t }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
 
 let analyze ast =
   let toplevel =
-    {letfuncs= ref []; strings= ref []; ctors_type= Hashtbl.create 16}
+    { letfuncs= ref []
+    ; strings= ref []
+    ; ctors_type= Hashtbl.create 16
+    ; exps= Hashtbl.create 16 }
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -926,10 +943,24 @@ let analyze ast =
           match arg with Some arg -> Some (aux_ptn env arg) | _ -> None
         in
         CtorApp
-          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, arg)
+          ( Some
+              ( try Hashtbl.find toplevel.ctors_type ctorname
+                with Not_found -> Hashtbl.find toplevel.exps ctorname )
+          , ctorname
+          , arg )
     | _ -> failwith "unexpected pattern"
   in
-  let rec aux env ast =
+  let rec analyze_pattern_match_cases env cases =
+    List.map
+      (fun (ptn, whn, ast) ->
+        let env' =
+          {env with symbols= add_symbols_in_pattern env.symbols ptn}
+        in
+        ( aux_ptn env' ptn
+        , (match whn with Some expr -> Some (aux env' expr) | None -> None)
+        , aux env' ast ) )
+      cases
+  and aux env ast =
     match ast with
     | IntValue _ | CharValue _ | UnitValue | EmptyList -> ast
     | StringValue _ ->
@@ -959,20 +990,10 @@ let analyze ast =
     | Lambda (args, body) ->
         let funcname = ".lambda" in
         aux env @@ LetAnd (false, [(Var funcname :: args, body)], Var funcname)
+    | TryWith (cond, cases) ->
+        TryWith (aux env cond, analyze_pattern_match_cases env cases)
     | MatchWith (cond, cases) ->
-        MatchWith
-          ( aux env cond
-          , List.map
-              (fun (ptn, whn, ast) ->
-                let env' =
-                  {env with symbols= add_symbols_in_pattern env.symbols ptn}
-                in
-                ( aux_ptn env' ptn
-                , ( match whn with
-                  | Some expr -> Some (aux env' expr)
-                  | None -> None )
-                , aux env' ast ) )
-              cases )
+        MatchWith (aux env cond, analyze_pattern_match_cases env cases)
     | Var name -> (
       match find_symbol env name with
       | 0, (Var _ as sym) -> sym
@@ -995,6 +1016,13 @@ let analyze ast =
             Hashtbl.add toplevel.ctors_type ctorname typename )
           ctornames ;
         TypeDef (type_param, typename, ctornames)
+    | ExpDef (expname, components) ->
+        let gen_expname = make_id expname in
+        Hashtbl.add toplevel.exps expname gen_expname ;
+        ExpDef (gen_expname, components)
+    | ExpPreDef (expname, components) ->
+        Hashtbl.add toplevel.exps expname expname ;
+        ExpDef (expname, components)
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with
       | CtorApp (typename, ctorname, None) when List.length args = 1 ->
@@ -1238,6 +1266,7 @@ type gen_environment = {offset: int; varoffset: int HashMap.t}
 let rec generate (letfuncs, strings) =
   let stack_size = ref 0 in
   let ctors_id = Hashtbl.create 16 in
+  let exps_id = Hashtbl.create 16 in
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -1310,10 +1339,15 @@ let rec generate (letfuncs, strings) =
           ]
     | CtorApp (Some typename, ctorname, None) ->
         gen_assign_pattern env exp_label
-        @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
+        @@ IntValue
+             ( try Hashtbl.find ctors_id (typename, ctorname)
+               with Not_found -> Hashtbl.find exps_id ctorname )
     | CtorApp (Some typename, ctorname, Some arg) ->
         let buf = Buffer.create 128 in
-        let id = Hashtbl.find ctors_id (typename, ctorname) in
+        let id =
+          try Hashtbl.find ctors_id (typename, ctorname) with Not_found ->
+            Hashtbl.find exps_id ctorname
+        in
         appfmt buf "pop rax" ;
         appstr buf "mov rdi, rax" ;
         appstr buf "and rax, 1" ;
@@ -1377,13 +1411,83 @@ let rec generate (letfuncs, strings) =
     appstr buf assign_code ;
     appfmt buf "jmp %s" exit_label ;
     appfmt buf "%s:" exp_label ;
-    appstr buf "mov rdi, 1" ;
-    appstr buf "call exit@PLT" ;
-    (* TODO: raise *)
+    (* TODO: arguments of Match_failure *)
+    appstr buf "mov rax, 1" ;
+    appstr buf @@ gen_raise_exp_of "Match_failure" true ;
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
-  in
-  let rec aux env = function
+  and gen_raise =
+    let buf = Buffer.create 128 in
+    (* Raise. Thanks to:
+     * https://github.com/ocamllabs/ocaml-multicore/wiki/Native-code-notes *)
+    appstr buf "mov rsp, r14" ;
+    appstr buf "pop r14" ;
+    appstr buf "ret" ;
+    Buffer.contents buf
+  and gen_raise_exp_of expname has_arguments =
+    let buf = Buffer.create 128 in
+    appstr buf "/* raise */" ;
+    if not has_arguments then
+      appfmt buf "mov rax, %d" @@ tagged_int @@ Hashtbl.find exps_id expname
+    else (
+      (* Assume that the argument is stored in rax *)
+      appstr buf "mov rbx, rax" ;
+      appstr buf @@ gen_alloc_block 1 0 @@ Hashtbl.find exps_id expname ;
+      appstr buf "mov [rax], rbx" ) ;
+    appstr buf @@ gen_raise ;
+    Buffer.contents buf
+  and gen_pattern_match_cases env cases exp_body =
+    (* Assume that the target value is in stack top *)
+    let buf = Buffer.create 128 in
+    let saved_rsp_offset = env.offset - 8 in
+    stack_size := max !stack_size (-saved_rsp_offset) ;
+    let env = {env with offset= saved_rsp_offset} in
+    appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
+    let exit_label = make_label () in
+    let exp_label =
+      List.fold_left
+        (fun this_label (ptn, whn, case) ->
+          let varnames = varnames_in_pattern ptn in
+          let offset = env.offset - (List.length varnames * 8) in
+          stack_size := max !stack_size (-offset) ;
+          let env =
+            { offset
+            ; varoffset=
+                (let rec aux i varoffset = function
+                   | varname :: varnames ->
+                       aux (i + 1)
+                         (HashMap.add varname (env.offset - (i * 8)) varoffset)
+                         varnames
+                   | [] -> varoffset
+                 in
+                 aux 1 env.varoffset varnames) }
+          in
+          let next_label = make_label () in
+          appfmt buf "%s:" this_label ;
+          appfmt buf "mov rsp, [rbp + %d]" saved_rsp_offset ;
+          appstr buf "pop rax" ;
+          appstr buf "push rax" ;
+          appstr buf "push rax" ;
+          appstr buf @@ gen_assign_pattern env next_label ptn ;
+          ( match whn with
+          | None -> ()
+          | Some expr ->
+              appstr buf @@ aux env expr ;
+              appstr buf "pop rax" ;
+              appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
+              appfmt buf "je %s" next_label ) ;
+          appstr buf "pop rax" ;
+          appstr buf @@ aux env case ;
+          appfmt buf "jmp %s /* exit label */" exit_label ;
+          next_label )
+        (make_label ()) cases
+    in
+    appfmt buf "%s:" exp_label ;
+    appstr buf "/* match failed */" ;
+    appstr buf exp_body ;
+    appfmt buf "%s:" exit_label ;
+    Buffer.contents buf
+  and aux env = function
     | IntValue num -> sprintf "push %d" (tagged_int num)
     | CharValue ch -> aux env @@ IntValue (Char.code ch)
     | UnitValue | EmptyList -> aux env (IntValue 0)
@@ -1650,62 +1754,53 @@ let rec generate (letfuncs, strings) =
         let buf = Buffer.create 256 in
         appstr buf "/* MatchWith BEGIN */" ;
         appstr buf @@ aux env cond ;
-        let saved_rsp_offset = env.offset - 8 in
-        stack_size := max !stack_size (-saved_rsp_offset) ;
-        let env = {env with offset= saved_rsp_offset} in
-        appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
-        let exit_label = make_label () in
-        let exp_label =
-          List.fold_left
-            (fun this_label (ptn, whn, case) ->
-              let varnames = varnames_in_pattern ptn in
-              let offset = env.offset - (List.length varnames * 8) in
-              stack_size := max !stack_size (-offset) ;
-              let env =
-                { offset
-                ; varoffset=
-                    (let rec aux i varoffset = function
-                       | varname :: varnames ->
-                           aux (i + 1)
-                             (HashMap.add varname
-                                (env.offset - (i * 8))
-                                varoffset)
-                             varnames
-                       | [] -> varoffset
-                     in
-                     aux 1 env.varoffset varnames) }
-              in
-              let next_label = make_label () in
-              appfmt buf "%s:" this_label ;
-              appfmt buf "mov rsp, [rbp + %d]" saved_rsp_offset ;
-              appstr buf "pop rax" ;
-              appstr buf "push rax" ;
-              appstr buf "push rax" ;
-              appstr buf @@ gen_assign_pattern env next_label ptn ;
-              ( match whn with
-              | None -> ()
-              | Some expr ->
-                  appstr buf @@ aux env expr ;
-                  appstr buf "pop rax" ;
-                  appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
-                  appfmt buf "je %s" next_label ) ;
-              appstr buf "pop rax" ;
-              appstr buf @@ aux env case ;
-              appfmt buf "jmp %s /* exit label */" exit_label ;
-              next_label )
-            (make_label ()) cases
-        in
-        appfmt buf "%s:" exp_label ;
-        appstr buf "/* Match_failure */" ;
-        appstr buf "mov rdi, 1" ;
-        appstr buf "call exit@PLT" ;
-        appfmt buf "%s:" exit_label ;
+        appstr buf
+        @@ gen_pattern_match_cases env cases
+             (let buf = Buffer.create 128 in
+              appstr buf "mov rax, 1" ;
+              (* TODO: arguments for Match_failure *)
+              appstr buf @@ gen_raise_exp_of "Match_failure" true ;
+              Buffer.contents buf) ;
         appstr buf "/* MatchWith END */" ;
+        Buffer.contents buf
+    | TryWith (cond, cases) ->
+        let offset = env.offset - 8 in
+        stack_size := max !stack_size (-offset) ;
+        let env = {env with offset} in
+        let exp_label = make_label () in
+        let exit_label = make_label () in
+        let buf = Buffer.create 256 in
+        appstr buf "/* TryWith BEGIN */" ;
+        (* set an exception handler *)
+        appfmt buf "lea r13, [rip + %s]" exp_label ;
+        appstr buf "push r13" ;
+        appstr buf "push r14" ;
+        appstr buf "mov r14, rsp" ;
+        appstr buf @@ aux env cond ;
+        appstr buf "pop rax" ;
+        appstr buf "pop rbx /* pop for r14 */" ;
+        appstr buf "pop rbx /* pop for r13 */" ;
+        appstr buf "push rax" ;
+        appfmt buf "jmp %s" exit_label ;
+        appfmt buf "%s:" exp_label ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        appstr buf "push rax" ;
+        appstr buf
+        @@ gen_pattern_match_cases env cases
+             (let buf = Buffer.create 128 in
+              appfmt buf "mov rax, [rbp + %d]" offset ;
+              appstr buf @@ gen_raise ;
+              Buffer.contents buf) ;
+        appfmt buf "%s:" exit_label ;
+        appstr buf "/* TryWith END */" ;
         Buffer.contents buf
     | TypeDef (_, typename, ctornames) ->
         List.iteri
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;
+        "push 0 /* dummy */"
+    | ExpDef (expname, _) ->
+        Hashtbl.add exps_id expname @@ Hashtbl.length exps_id ;
         "push 0 /* dummy */"
     | _ -> raise Unexpected_ast
   in
@@ -1890,11 +1985,25 @@ let rec generate (letfuncs, strings) =
       appstr buf ""
     done ;
     appstr buf "main:" ;
+    appstr buf "push rbp" ;
+    appstr buf "mov rbp, rsp" ;
+    (* default exception handler *)
+    appstr buf "lea r13, [rip + aqaml_default_exception_handler]" ;
+    appstr buf "push r13" ;
+    appstr buf "push r14" ;
+    appstr buf "mov r14, rsp" ;
     (* give unit value as an argument *)
     appfmt buf "mov rax, %d" @@ tagged_int 0 ;
     appstr buf "call aqaml_main" ;
+    appstr buf "pop rax" ;
+    appstr buf "pop rax" ;
     appstr buf "mov rax, 0" ;
-    appstr buf "ret\n" ;
+    appstr buf "pop rbp" ;
+    appstr buf "ret" ;
+    appstr buf "aqaml_default_exception_handler:" ;
+    appfmt buf "mov rax, %d" @@ tagged_int 1 ;
+    appstr buf "call aqaml_exit" ;
+    appstr buf "" ;
     Buffer.contents buf
   in
   main_code ^ letfuncs_code ^ strings_code
@@ -1904,6 +2013,12 @@ let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let asts = parse tokens in
+let asts =
+  ExprSeq
+    [ ExpPreDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
+    ; ExpPreDef ("Not_found", None)
+    ; asts ]
+in
 let code = generate (analyze asts) in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])

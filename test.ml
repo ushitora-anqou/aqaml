@@ -998,3 +998,32 @@ let x = ref [1; 2; 3] in
 test !x [1; 2; 3] ;
 x := 4 :: !x ;
 test !x [4; 1; 2; 3]
+
+;;
+test
+  ( try
+      let [] = [1] in
+      3
+    with Match_failure _ -> 5 )
+  5
+
+;;
+test
+  ( try
+      let 1, 2 = (3, 4) in
+      10
+    with
+  | Not_found -> 5
+  | Match_failure _ -> 3 )
+  3
+
+;;
+test
+  ( ( try
+        try
+          let [] = [1] in
+          10
+        with Not_found -> 5
+      with Match_failure _ -> 3 )
+  + 5 )
+  8
