@@ -124,6 +124,7 @@ type token =
   | Exclam
   | Try
   | Exception
+  | Mod
 
 exception Unexpected_token
 
@@ -179,6 +180,7 @@ let string_of_token = function
   | Exclam -> "!"
   | Try -> "try"
   | Exception -> "exception"
+  | Mod -> "mod"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -308,6 +310,7 @@ let tokenize program =
           | "and" -> And
           | "try" -> Try
           | "exception" -> Exception
+          | "mod" -> Mod
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -375,10 +378,11 @@ type ast =
   | CharValue of char
   | StringValue of string * string
   | TupleValue of ast list
-  | Add of (ast * ast)
-  | Sub of (ast * ast)
-  | Mul of (ast * ast)
-  | Div of (ast * ast)
+  | Add of ast * ast
+  | Sub of ast * ast
+  | Mul of ast * ast
+  | Div of ast * ast
+  | Rem of ast * ast
   | StringConcat of ast * ast
   | ListConcat of ast * ast
   | Negate of ast
@@ -511,6 +515,9 @@ let parse tokens =
       | Slash :: tokens ->
           let tokens, rhs = parse_unary tokens in
           aux (Div (lhs, rhs)) tokens
+      | Mod :: tokens ->
+          let tokens, rhs = parse_unary tokens in
+          aux (Rem (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
     in
     let tokens, ast = parse_unary tokens in
@@ -985,6 +992,7 @@ let analyze ast =
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
+    | Rem (lhs, rhs) -> Rem (aux env lhs, aux env rhs)
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
@@ -1569,17 +1577,31 @@ let rec generate (letfuncs, strings) =
           ; tag_int "rax"
           ; "push rax" ]
     | Div (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
-          ; "pop rdi"
-          ; untag_int "rdi"
-          ; "pop rax"
-          ; untag_int "rax"
-          ; "cqo"
-          ; "idiv rdi"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rdi" ;
+        appstr buf @@ untag_int "rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf "cqo" ;
+        appstr buf "idiv rdi" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
+    | Rem (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rdi" ;
+        appstr buf @@ untag_int "rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf "cqo" ;
+        appstr buf "idiv rdi" ;
+        appstr buf @@ tag_int "rdx" ;
+        appstr buf "push rdx" ;
+        Buffer.contents buf
     | StringConcat (lhs, rhs) ->
         let buf = Buffer.create 128 in
         appstr buf @@ aux env lhs ;

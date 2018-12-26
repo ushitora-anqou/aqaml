@@ -1046,3 +1046,7 @@ exception TestExc of string
 
 ;;
 test (try raise (TestExc "debug") with TestExc str -> str) "debug"
+
+;;
+test (5 mod 3) 2 ;
+test (-5 mod 3) (-2)
