@@ -1008,7 +1008,11 @@ let analyze ast =
       | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
     | CtorApp (None, ctorname, None) ->
         CtorApp
-          (Some (Hashtbl.find toplevel.ctors_type ctorname), ctorname, None)
+          ( Some
+              ( try Hashtbl.find toplevel.ctors_type ctorname
+                with Not_found -> Hashtbl.find toplevel.exps ctorname )
+          , ctorname
+          , None )
     | TypeDef (type_param, typename, ctornames) ->
         let typename = make_id typename in
         List.iter
@@ -1253,7 +1257,8 @@ let analyze ast =
         @@ [ ("String.length", FuncVar ("aqaml_string_length", 1))
            ; ("print_string", FuncVar ("aqaml_print_string", 1))
            ; ("exit", FuncVar ("aqaml_exit", 1))
-           ; ("ref", FuncVar ("aqaml_ref", 1)) ]
+           ; ("ref", FuncVar ("aqaml_ref", 1))
+           ; ("raise", FuncVar ("aqaml_raise", 1)) ]
     ; parent= None
     ; freevars= ref [] }
   in
@@ -1416,7 +1421,7 @@ let rec generate (letfuncs, strings) =
     appstr buf @@ gen_raise_exp_of "Match_failure" true ;
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
-  and gen_raise =
+  and gen_raise () =
     let buf = Buffer.create 128 in
     (* Raise. Thanks to:
      * https://github.com/ocamllabs/ocaml-multicore/wiki/Native-code-notes *)
@@ -1434,7 +1439,7 @@ let rec generate (letfuncs, strings) =
       appstr buf "mov rbx, rax" ;
       appstr buf @@ gen_alloc_block 1 0 @@ Hashtbl.find exps_id expname ;
       appstr buf "mov [rax], rbx" ) ;
-    appstr buf @@ gen_raise ;
+    appstr buf @@ gen_raise () ;
     Buffer.contents buf
   and gen_pattern_match_cases env cases exp_body =
     (* Assume that the target value is in stack top *)
@@ -1667,11 +1672,16 @@ let rec generate (letfuncs, strings) =
       with Not_found ->
         failwith (sprintf "not found in code generation: %s" varname) )
     | CtorApp (Some typename, ctorname, None) ->
-        aux env @@ IntValue (Hashtbl.find ctors_id (typename, ctorname))
+        aux env
+        @@ IntValue
+             ( try Hashtbl.find ctors_id (typename, ctorname)
+               with Not_found -> Hashtbl.find exps_id ctorname )
     | CtorApp (Some typename, ctorname, Some arg) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ gen_alloc_block 1 0
-        @@ Hashtbl.find ctors_id (typename, ctorname) ;
+        appstr buf
+        @@ gen_alloc_block 1 0
+             ( try Hashtbl.find ctors_id (typename, ctorname)
+               with Not_found -> Hashtbl.find exps_id ctorname ) ;
         appstr buf "push rax" ;
         appstr buf @@ aux env arg ;
         appstr buf "pop rdi" ;
@@ -1789,7 +1799,7 @@ let rec generate (letfuncs, strings) =
         @@ gen_pattern_match_cases env cases
              (let buf = Buffer.create 128 in
               appfmt buf "mov rax, [rbp + %d]" offset ;
-              appstr buf @@ gen_raise ;
+              appstr buf @@ gen_raise () ;
               Buffer.contents buf) ;
         appfmt buf "%s:" exit_label ;
         appstr buf "/* TryWith END */" ;
@@ -1948,6 +1958,9 @@ let rec generate (letfuncs, strings) =
     appstr buf @@ gen_alloc_block 1 0 0 ;
     appstr buf "mov [rax], rbx" ;
     appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_raise:" ;
+    appstr buf @@ gen_raise () ;
     appstr buf "" ;
     for nargs = 1 to 9 do
       let label_loop = make_label () in

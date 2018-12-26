@@ -1027,3 +1027,12 @@ test
       with Match_failure _ -> 3 )
   + 5 )
   8
+
+;;
+test (try raise Not_found with Not_found -> 10) 10
+
+;;
+test
+  ( try raise (Match_failure ("//toplevel//", 5, 13)) with Match_failure _ -> 2
+  )
+  2
