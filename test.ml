@@ -1067,3 +1067,79 @@ and character = char
 and mixed = integer * character
 
 and variant = Integer of integer | Character of character | Mixed of mixed
+
+(* from commit 7201ef6ac69c3fd93bd1e6dcb236c91276a8a75e *)
+type token = IntLiteral of int | Plus | Minus | Star | Slash
+
+type ast =
+  | Int of int
+  | Add of (ast * ast)
+  | Sub of (ast * ast)
+  | Mul of (ast * ast)
+  | Div of (ast * ast)
+
+let parse tokens =
+  let parse_integer = function
+    | IntLiteral num :: tokens -> (tokens, Int num)
+  in
+  let parse_multiplicative tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Star :: tokens ->
+          let tokens, rhs = parse_integer tokens in
+          aux (Mul (lhs, rhs)) tokens
+      | Slash :: tokens ->
+          let tokens, rhs = parse_integer tokens in
+          aux (Div (lhs, rhs)) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_integer tokens in
+    aux ast tokens
+  in
+  let parse_additive tokens =
+    let rec aux lhs tokens =
+      match tokens with
+      | Plus :: tokens ->
+          let tokens, rhs = parse_multiplicative tokens in
+          aux (Add (lhs, rhs)) tokens
+      | Minus :: tokens ->
+          let tokens, rhs = parse_multiplicative tokens in
+          aux (Sub (lhs, rhs)) tokens
+      | _ -> (tokens, lhs)
+    in
+    let tokens, ast = parse_multiplicative tokens in
+    aux ast tokens
+  in
+  let _, ast = parse_additive tokens in
+  ast
+
+let rec eval = function
+  | Int num -> num
+  | Add (lhs, rhs) -> eval lhs + eval rhs
+  | Sub (lhs, rhs) -> eval lhs - eval rhs
+  | Mul (lhs, rhs) -> eval lhs * eval rhs
+  | Div (lhs, rhs) -> eval lhs / eval rhs
+
+;;
+test
+  (eval
+     (parse
+        (* 4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1 *)
+        [ IntLiteral 4
+        ; Slash
+        ; IntLiteral 2
+        ; Star
+        ; IntLiteral 3
+        ; Plus
+        ; IntLiteral 1
+        ; Minus
+        ; IntLiteral 10
+        ; Slash
+        ; IntLiteral 2
+        ; Plus
+        ; IntLiteral 4
+        ; Star
+        ; IntLiteral 2
+        ; Star
+        ; IntLiteral 1 ]))
+  10
