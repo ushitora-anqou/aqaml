@@ -1059,3 +1059,5 @@ test (19 lsr 2) 4 ;
 test (-1 lsr 61) 3 ;
 test (19 asr 2) 4 ;
 test (-1 asr 61) (-1)
+
+type integer = int

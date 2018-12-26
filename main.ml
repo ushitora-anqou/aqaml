@@ -420,6 +420,7 @@ type ast =
   | MakeCls of string * int * string list
   | Lambda of pattern list * ast
   | TypeDef of typ option * string * (string * typ option) list
+  | TypeAlias of typ option * string * typ
   | CtorApp of string option * string * ast option
   | RefAssign of ast * ast
   | Deref of ast
@@ -858,22 +859,30 @@ let parse tokens =
   and parse_type_def tokens =
     (* token Type is already fetched *)
     let aux type_param = function
-      | Ident typename :: Equal :: tokens ->
-          let rec aux first ctors = function
-            | Bar :: Ident ctorname :: Of :: tokens ->
-                let tokens, typ = parse_typexpr tokens in
-                aux false ((ctorname, Some typ) :: ctors) tokens
-            | Ident ctorname :: Of :: tokens when first ->
-                let tokens, typ = parse_typexpr tokens in
-                aux false ((ctorname, Some typ) :: ctors) tokens
-            | Bar :: Ident ctorname :: tokens ->
-                aux false ((ctorname, None) :: ctors) tokens
-            | Ident ctorname :: tokens when first ->
-                aux false ((ctorname, None) :: ctors) tokens
-            | tokens -> (tokens, ctors)
+      | Ident typename :: Equal :: tokens -> (
+          let parse_variant tokens =
+            let rec aux first ctors = function
+              | Bar :: Ident ctorname :: Of :: tokens ->
+                  let tokens, typ = parse_typexpr tokens in
+                  aux false ((ctorname, Some typ) :: ctors) tokens
+              | Ident ctorname :: Of :: tokens when first ->
+                  let tokens, typ = parse_typexpr tokens in
+                  aux false ((ctorname, Some typ) :: ctors) tokens
+              | Bar :: Ident ctorname :: tokens ->
+                  aux false ((ctorname, None) :: ctors) tokens
+              | Ident ctorname :: tokens when first ->
+                  aux false ((ctorname, None) :: ctors) tokens
+              | tokens -> (tokens, ctors)
+            in
+            let tokens, ctors = aux true [] tokens in
+            (tokens, TypeDef (type_param, typename, ctors))
           in
-          let tokens, ctors = aux true [] tokens in
-          (tokens, TypeDef (type_param, typename, ctors))
+          match tokens with
+          | Ident str :: _ when is_capital str.[0] -> parse_variant tokens
+          | Bar :: _ -> parse_variant tokens
+          | tokens ->
+              let tokens, typ = parse_typexpr tokens in
+              (tokens, TypeAlias (type_param, typename, typ)) )
       | _ -> raise Unexpected_token
     in
     let parse_type_param = function
@@ -1064,6 +1073,7 @@ let analyze ast =
                 with Not_found -> Hashtbl.find toplevel.exps ctorname )
           , ctorname
           , None )
+    | TypeAlias _ as ast -> ast
     | TypeDef (type_param, typename, ctornames) ->
         let typename = make_id typename in
         List.iter
@@ -1905,6 +1915,7 @@ let rec generate (letfuncs, strings) =
         appfmt buf "%s:" exit_label ;
         appstr buf "/* TryWith END */" ;
         Buffer.contents buf
+    | TypeAlias _ -> "push 0 /* dummy */"
     | TypeDef (_, typename, ctornames) ->
         List.iteri
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
