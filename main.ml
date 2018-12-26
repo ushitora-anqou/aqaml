@@ -125,6 +125,9 @@ type token =
   | Try
   | Exception
   | Mod
+  | Lsl
+  | Lsr
+  | Asr
 
 exception Unexpected_token
 
@@ -181,6 +184,9 @@ let string_of_token = function
   | Try -> "try"
   | Exception -> "exception"
   | Mod -> "mod"
+  | Lsl -> "lsl"
+  | Lsr -> "lsr"
+  | Asr -> "asr"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -311,6 +317,9 @@ let tokenize program =
           | "try" -> Try
           | "exception" -> Exception
           | "mod" -> Mod
+          | "lsl" -> Lsl
+          | "lsr" -> Lsr
+          | "asr" -> Asr
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -383,6 +392,9 @@ type ast =
   | Mul of ast * ast
   | Div of ast * ast
   | Rem of ast * ast
+  | LogicalLeftShift of ast * ast
+  | LogicalRightShift of ast * ast
+  | ArithmeticRightShift of ast * ast
   | StringConcat of ast * ast
   | ListConcat of ast * ast
   | Negate of ast
@@ -506,21 +518,36 @@ let parse tokens =
         let tokens, ast = parse_unary tokens in
         (tokens, Positate ast)
     | tokens -> parse_funccall tokens
+  and parse_shift tokens =
+    let rec aux lhs = function
+      | Lsl :: tokens ->
+          let tokens, rhs = parse_unary tokens in
+          aux (LogicalLeftShift (lhs, rhs)) tokens
+      | Lsr :: tokens ->
+          let tokens, rhs = parse_unary tokens in
+          aux (LogicalRightShift (lhs, rhs)) tokens
+      | Asr :: tokens ->
+          let tokens, rhs = parse_unary tokens in
+          aux (ArithmeticRightShift (lhs, rhs)) tokens
+      | tokens -> (tokens, lhs)
+    in
+    let tokens, lhs = parse_unary tokens in
+    aux lhs tokens
   and parse_multiplicative tokens =
     let rec aux lhs tokens =
       match tokens with
       | Star :: tokens ->
-          let tokens, rhs = parse_unary tokens in
+          let tokens, rhs = parse_shift tokens in
           aux (Mul (lhs, rhs)) tokens
       | Slash :: tokens ->
-          let tokens, rhs = parse_unary tokens in
+          let tokens, rhs = parse_shift tokens in
           aux (Div (lhs, rhs)) tokens
       | Mod :: tokens ->
-          let tokens, rhs = parse_unary tokens in
+          let tokens, rhs = parse_shift tokens in
           aux (Rem (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_unary tokens in
+    let tokens, ast = parse_shift tokens in
     aux ast tokens
   and parse_additive tokens =
     let rec aux lhs tokens =
@@ -993,6 +1020,9 @@ let analyze ast =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | Rem (lhs, rhs) -> Rem (aux env lhs, aux env rhs)
+    | LogicalLeftShift (lhs, rhs) -> LogicalLeftShift (lhs, rhs)
+    | LogicalRightShift (lhs, rhs) -> LogicalRightShift (lhs, rhs)
+    | ArithmeticRightShift (lhs, rhs) -> ArithmeticRightShift (lhs, rhs)
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
@@ -1601,6 +1631,42 @@ let rec generate (letfuncs, strings) =
         appstr buf "idiv rdi" ;
         appstr buf @@ tag_int "rdx" ;
         appstr buf "push rdx" ;
+        Buffer.contents buf
+    | LogicalLeftShift (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rcx" ;
+        appstr buf @@ untag_int "rcx" ;
+        appstr buf "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf "shl rax, cl" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
+    | LogicalRightShift (lhs, rhs) ->
+        (* Note that the size of int is 63bit, not 64bit. *)
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rcx" ;
+        appstr buf @@ untag_int "rcx" ;
+        appstr buf "pop rax" ;
+        appstr buf "shr rax, cl" ;
+        appstr buf "or rax, 1" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
+    | ArithmeticRightShift (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rcx" ;
+        appstr buf @@ untag_int "rcx" ;
+        appstr buf "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf "sar rax, cl" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
         Buffer.contents buf
     | StringConcat (lhs, rhs) ->
         let buf = Buffer.create 128 in

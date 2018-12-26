@@ -1050,3 +1050,12 @@ test (try raise (TestExc "debug") with TestExc str -> str) "debug"
 ;;
 test (5 mod 3) 2 ;
 test (-5 mod 3) (-2)
+
+;;
+test (5 lsl 2) 20 ;
+test (-1 lsl 2) (-4) ;
+test (20 lsr 2) 5 ;
+test (19 lsr 2) 4 ;
+test (-1 lsr 61) 3 ;
+test (19 asr 2) 4 ;
+test (-1 asr 61) (-1)
