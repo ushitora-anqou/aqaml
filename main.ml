@@ -419,7 +419,7 @@ type ast =
   | MatchWith of ast * (pattern * ast option * ast) list
   | MakeCls of string * int * string list
   | Lambda of pattern list * ast
-  | TypeDef of typ option * string * (string * typ option) list
+  | TypeVariant of typ option * string * (string * typ option) list
   | TypeAlias of typ option * string * typ
   | CtorApp of string option * string * ast option
   | RefAssign of ast * ast
@@ -875,7 +875,7 @@ let parse tokens =
               | tokens -> (tokens, ctors)
             in
             let tokens, ctors = aux true [] tokens in
-            (tokens, TypeDef (type_param, typename, ctors))
+            (tokens, TypeVariant (type_param, typename, ctors))
           in
           match tokens with
           | Ident str :: _ when is_capital str.[0] -> parse_variant tokens
@@ -1074,13 +1074,13 @@ let analyze ast =
           , ctorname
           , None )
     | TypeAlias _ as ast -> ast
-    | TypeDef (type_param, typename, ctornames) ->
+    | TypeVariant (type_param, typename, ctornames) ->
         let typename = make_id typename in
         List.iter
           (fun (ctorname, _) ->
             Hashtbl.add toplevel.ctors_type ctorname typename )
           ctornames ;
-        TypeDef (type_param, typename, ctornames)
+        TypeVariant (type_param, typename, ctornames)
     | ExpDef (expname, components) ->
         let gen_expname = make_id expname in
         Hashtbl.add toplevel.exps expname gen_expname ;
@@ -1916,7 +1916,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "/* TryWith END */" ;
         Buffer.contents buf
     | TypeAlias _ -> "push 0 /* dummy */"
-    | TypeDef (_, typename, ctornames) ->
+    | TypeVariant (_, typename, ctornames) ->
         List.iteri
           (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
           ctornames ;
