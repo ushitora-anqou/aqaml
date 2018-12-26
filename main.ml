@@ -123,6 +123,7 @@ type token =
   | ColonEqual
   | Exclam
   | Try
+  | Exception
 
 exception Unexpected_token
 
@@ -177,6 +178,7 @@ let string_of_token = function
   | ColonEqual -> ":="
   | Exclam -> "!"
   | Try -> "try"
+  | Exception -> "exception"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -305,6 +307,7 @@ let tokenize program =
           | "string" -> KwString
           | "and" -> And
           | "try" -> Try
+          | "exception" -> Exception
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -860,6 +863,13 @@ let parse tokens =
     match parse_type_params tokens with
     | None -> aux None tokens
     | Some (tokens, type_params) -> aux (Some type_params) tokens
+  and parse_exp_def = function
+    (* token Exception is already fetched *)
+    | Ident expname :: Of :: tokens ->
+        let tokens, typ = parse_typexpr tokens in
+        (tokens, ExpDef (expname, Some typ))
+    | Ident expname :: tokens -> (tokens, ExpDef (expname, None))
+    | _ -> raise Unexpected_token
   and parse_expressions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
      * are converted to (maybe large) one ExprSeq, and all 'let' without 'in'
@@ -871,6 +881,9 @@ let parse tokens =
       | [] -> exprs
       | Type :: tokens ->
           let tokens, expr = parse_type_def tokens in
+          aux (expr :: exprs) tokens
+      | Exception :: tokens ->
+          let tokens, expr = parse_exp_def tokens in
           aux (expr :: exprs) tokens
       | tokens ->
           let tokens, expr = parse_expression tokens in
@@ -1346,12 +1359,12 @@ let rec generate (letfuncs, strings) =
         gen_assign_pattern env exp_label
         @@ IntValue
              ( try Hashtbl.find ctors_id (typename, ctorname)
-               with Not_found -> Hashtbl.find exps_id ctorname )
+               with Not_found -> Hashtbl.find exps_id typename )
     | CtorApp (Some typename, ctorname, Some arg) ->
         let buf = Buffer.create 128 in
         let id =
           try Hashtbl.find ctors_id (typename, ctorname) with Not_found ->
-            Hashtbl.find exps_id ctorname
+            Hashtbl.find exps_id typename
         in
         appfmt buf "pop rax" ;
         appstr buf "mov rdi, rax" ;
@@ -1675,13 +1688,13 @@ let rec generate (letfuncs, strings) =
         aux env
         @@ IntValue
              ( try Hashtbl.find ctors_id (typename, ctorname)
-               with Not_found -> Hashtbl.find exps_id ctorname )
+               with Not_found -> Hashtbl.find exps_id typename )
     | CtorApp (Some typename, ctorname, Some arg) ->
         let buf = Buffer.create 128 in
         appstr buf
         @@ gen_alloc_block 1 0
              ( try Hashtbl.find ctors_id (typename, ctorname)
-               with Not_found -> Hashtbl.find exps_id ctorname ) ;
+               with Not_found -> Hashtbl.find exps_id typename ) ;
         appstr buf "push rax" ;
         appstr buf @@ aux env arg ;
         appstr buf "pop rdi" ;

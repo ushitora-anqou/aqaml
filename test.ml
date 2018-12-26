@@ -1036,3 +1036,13 @@ test
   ( try raise (Match_failure ("//toplevel//", 5, 13)) with Match_failure _ -> 2
   )
   2
+
+exception TestExc
+
+;;
+test (try raise TestExc with TestExc -> 10) 10
+
+exception TestExc of string
+
+;;
+test (try raise (TestExc "debug") with TestExc str -> str) "debug"
