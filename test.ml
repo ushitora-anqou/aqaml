@@ -1061,3 +1061,9 @@ test (19 asr 2) 4 ;
 test (-1 asr 61) (-1)
 
 type integer = int
+
+and character = char
+
+and mixed = integer * character
+
+and variant = Integer of integer | Character of character | Mixed of mixed
