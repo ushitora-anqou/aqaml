@@ -1932,6 +1932,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "/* TryWith BEGIN */" ;
         (* set an exception handler *)
         appfmt buf "lea r13, [rip + %s]" exp_label ;
+        appstr buf "push rbp" ;
         appstr buf "push r13" ;
         appstr buf "push r14" ;
         appstr buf "mov r14, rsp" ;
@@ -1939,9 +1940,11 @@ let rec generate (letfuncs, strings) =
         appstr buf "pop rax" ;
         appstr buf "pop r14 /* pop for r14 */" ;
         appstr buf "pop rbx /* pop for r13 */" ;
+        appstr buf "pop rbx /* pop for rbp */" ;
         appstr buf "push rax" ;
         appfmt buf "jmp %s" exit_label ;
         appfmt buf "%s:" exp_label ;
+        appstr buf "pop rbp" ;
         appfmt buf "mov [rbp + %d], rax" offset ;
         appstr buf "push rax" ;
         appstr buf

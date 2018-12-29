@@ -1080,6 +1080,38 @@ test str.[5] ' '
 (* from commit 7201ef6ac69c3fd93bd1e6dcb236c91276a8a75e *)
 type token = IntLiteral of int | Plus | Minus | Star | Slash
 
+exception EOF
+
+let digit x = match x with '0' .. '9' -> Char.code x - Char.code '0'
+
+let tokenize program =
+  let next_char i =
+    if i < String.length program then (i + 1, program.[i]) else raise EOF
+  in
+  let rec next_int i acc =
+    try
+      let i, ch = next_char i in
+      match ch with
+      | '0' .. '9' -> next_int i ((acc * 10) + digit ch)
+      | _ -> (i - 1, acc)
+    with EOF -> (i, acc)
+  in
+  let rec tokenize i =
+    try
+      let i, ch = next_char i in
+      match ch with
+      | ' ' | '\t' | '\n' -> tokenize i
+      | '0' .. '9' ->
+          let i, num = next_int (i - 1) 0 in
+          IntLiteral num :: tokenize i
+      | '+' -> Plus :: tokenize i
+      | '-' -> Minus :: tokenize i
+      | '*' -> Star :: tokenize i
+      | '/' -> Slash :: tokenize i
+    with EOF -> []
+  in
+  tokenize 0
+
 type ast =
   | Int of int
   | Add of (ast * ast)
@@ -1130,25 +1162,4 @@ let rec eval = function
   | Div (lhs, rhs) -> eval lhs / eval rhs
 
 ;;
-test
-  (eval
-     (parse
-        (* 4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1 *)
-        [ IntLiteral 4
-        ; Slash
-        ; IntLiteral 2
-        ; Star
-        ; IntLiteral 3
-        ; Plus
-        ; IntLiteral 1
-        ; Minus
-        ; IntLiteral 10
-        ; Slash
-        ; IntLiteral 2
-        ; Plus
-        ; IntLiteral 4
-        ; Star
-        ; IntLiteral 2
-        ; Star
-        ; IntLiteral 1 ]))
-  10
+test (eval (parse (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))) 10
