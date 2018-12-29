@@ -499,10 +499,10 @@ test (f 10 10) 100 ;
 test (f 10 20) 21 ;
 test (f 15 3) 30
 
-;;
 let rec fold_left f a bs =
   match bs with b :: bs -> fold_left f (f a b) bs | _ -> a
-in
+
+;;
 test (fold_left (fun a b -> (a - b) * 2) 100 [1; 2; 3]) 778 ;
 test
   (fold_left (fun a (b, c) -> b :: c :: a) [] [(1, 2); (2, 3); (4, 5)])
@@ -1163,3 +1163,76 @@ let rec eval = function
 
 ;;
 test (eval (parse (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))) 10
+
+let ignore _ = ()
+
+type 'a hashmap = (string * 'a) list
+
+let hashmap_empty = []
+
+let hashmap_add k v m = (k, v) :: m
+
+let rec hashmap_find k = function
+  | (k', v') :: xs -> if k = k' then v' else hashmap_find k xs
+  | [] -> raise Not_found
+
+let hashmap_mem k m =
+  try
+    ignore (hashmap_find k m) ;
+    true
+  with Not_found -> false
+
+let hashmap_merge f m1 m2 =
+  let src = ref hashmap_empty in
+  let rec iter_m1 = function
+    | (k, v) :: xs ->
+        ( try src := hashmap_add k (Some v, Some (hashmap_find k m2)) !src
+          with Not_found -> src := hashmap_add k (Some v, None) !src ) ;
+        iter_m1 xs
+    | [] -> ()
+  in
+  let rec iter_m2 = function
+    | (k, v) :: xs ->
+        if not (hashmap_mem k m1) then src := hashmap_add k (None, Some v) !src ;
+        iter_m2 xs
+    | [] -> ()
+  in
+  iter_m1 m1 ;
+  iter_m2 m2 ;
+  fold_left
+    (fun m (k, (l, r)) ->
+      match f k l r with None -> m | Some v -> hashmap_add k v m )
+    hashmap_empty !src
+
+let hashmap_union f m1 m2 =
+  hashmap_merge
+    (fun k l r ->
+      match (l, r) with
+      | None, None -> None
+      | Some v, None -> l
+      | None, Some v -> r
+      | Some v1, Some v2 -> f k v1 v2 )
+    m1 m2
+
+;;
+let m = hashmap_empty in
+(* Thanks to: https://github.com/stereobooster/programming-languages-genealogical-tree *)
+let m = hashmap_add "ML" 1977 m in
+let m = hashmap_add "SML" 1984 m in
+let m = hashmap_add "Caml" 1987 m in
+let m = hashmap_add "OCaml" 1996 m in
+test (hashmap_find "SML" m) 1984 ;
+test (hashmap_find "OCaml" m) 1996 ;
+test (try hashmap_find "C" m with Not_found -> -1) (-1) ;
+test (try hashmap_find "ML" m with Not_found -> -1) 1977 ;
+test (hashmap_mem "ML" m) true ;
+test (hashmap_mem "C" m) false ;
+let m' = hashmap_empty in
+let m' = hashmap_add "ANSI C" 1989 m' in
+let m' = hashmap_add "SML" 1990 m' in
+let m' = hashmap_add "Caml" 1987 m' in
+let m = hashmap_union (fun k l r -> Some r) m m' in
+test (hashmap_find "SML" m) 1990 ;
+test (hashmap_find "OCaml" m) 1996 ;
+test (hashmap_find "Caml" m) 1987 ;
+test (hashmap_find "ANSI C" m) 1989
