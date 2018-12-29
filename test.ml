@@ -1045,7 +1045,11 @@ test (try raise TestExc with TestExc -> 10) 10
 exception TestExc of string
 
 ;;
-test (try raise (TestExc "debug") with TestExc str -> str) "debug"
+test (try raise (TestExc "debug") with TestExc str -> str) "debug" ;
+test
+  ( try (try 10 with Not_found -> 1) + raise (TestExc "str")
+    with TestExc _ -> 5 )
+  5
 
 ;;
 test (5 mod 3) 2 ;

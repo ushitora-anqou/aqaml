@@ -1918,7 +1918,7 @@ let rec generate (letfuncs, strings) =
         appstr buf "mov r14, rsp" ;
         appstr buf @@ aux env cond ;
         appstr buf "pop rax" ;
-        appstr buf "pop rbx /* pop for r14 */" ;
+        appstr buf "pop r14 /* pop for r14 */" ;
         appstr buf "pop rbx /* pop for r13 */" ;
         appstr buf "push rax" ;
         appfmt buf "jmp %s" exit_label ;
