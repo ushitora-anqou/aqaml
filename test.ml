@@ -1072,6 +1072,11 @@ and mixed = integer * character
 
 and variant = Integer of integer | Character of character | Mixed of mixed
 
+;;
+test "abc".[1] 'b' ;
+let str = "abcde fghi" in
+test str.[5] ' '
+
 (* from commit 7201ef6ac69c3fd93bd1e6dcb236c91276a8a75e *)
 type token = IntLiteral of int | Plus | Minus | Star | Slash
 

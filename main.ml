@@ -128,6 +128,7 @@ type token =
   | Lsl
   | Lsr
   | Asr
+  | DotLBracket
 
 exception Unexpected_token
 
@@ -187,6 +188,7 @@ let string_of_token = function
   | Lsl -> "lsl"
   | Lsr -> "lsr"
   | Asr -> "asr"
+  | DotLBracket -> ".["
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -336,7 +338,10 @@ let tokenize program =
       | '!' -> Exclam :: aux i
       | '.' -> (
           let i, ch = next_char i in
-          match ch with '.' -> DotDot :: aux i | _ -> Dot :: aux (i - 1) )
+          match ch with
+          | '.' -> DotDot :: aux i
+          | '[' -> DotLBracket :: aux i
+          | _ -> Dot :: aux (i - 1) )
       | '-' -> (
           let i, ch = next_char i in
           match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
@@ -497,11 +502,23 @@ let parse tokens =
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
     | _ -> raise Unexpected_token
+  and parse_dot_lparen tokens =
+    let tokens, lhs = parse_primary tokens in
+    match tokens with
+    | DotLBracket :: tokens -> (
+        let tokens, rhs = parse_expression tokens in
+        match tokens with
+        | RBracket :: tokens ->
+            (* a.[b] returns a b-th character of a string a.
+             * Therefore, convert it to String.get call *)
+            (tokens, AppCls (Var "String.get", [lhs; rhs]))
+        | _ -> raise Unexpected_token )
+    | _ -> (tokens, lhs)
   and parse_prefix = function
     | Exclam :: tokens ->
-        let tokens, ast = parse_primary tokens in
+        let tokens, ast = parse_dot_lparen tokens in
         (tokens, Deref ast)
-    | tokens -> parse_primary tokens
+    | tokens -> parse_dot_lparen tokens
   and parse_funccall tokens =
     let rec aux tokens =
       if is_prefix tokens then
@@ -1335,6 +1352,8 @@ let analyze ast =
     { symbols=
         hashmap_of_list
         @@ [ ("String.length", FuncVar ("aqaml_string_length", 1))
+           ; ("String.get", FuncVar ("aqaml_string_get", 2))
+           ; ("Char.code", FuncVar ("aqaml_char_code", 1))
            ; ("print_string", FuncVar ("aqaml_print_string", 1))
            ; ("exit", FuncVar ("aqaml_exit", 1))
            ; ("ref", FuncVar ("aqaml_ref", 1))
@@ -2075,6 +2094,17 @@ let rec generate (letfuncs, strings) =
     appstr buf "mov rdi, rax" ;
     appstr buf "call aqaml_string_length_detail@PLT" ;
     appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_string_get:" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf @@ untag_int "rbx" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "call aqaml_string_get_detail@PLT" ;
+    appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_char_code:" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_print_string:" ;

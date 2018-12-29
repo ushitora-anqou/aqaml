@@ -127,6 +127,15 @@ uint64_t aqaml_string_length_detail(uint64_t ptr)
     return length;
 }
 
+uint64_t aqaml_string_get_detail(uint64_t str_src, uint64_t index)
+{
+    AQamlValue val = get_value(str_src);
+    // assert(str_src.kind == AQAML_STRING);
+    uint64_t length = aqaml_string_length_detail(str_src);
+    assert(index < length);  // TODO: raise Invalid_argument
+    return val.string->str[index];
+}
+
 void aqaml_print_string_detail(uint64_t ptr)
 {
     AQamlValue val = get_value(ptr);
