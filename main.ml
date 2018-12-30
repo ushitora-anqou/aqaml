@@ -21,6 +21,8 @@ let rec list_unique lst =
 
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
+let is_lower = function 'a' .. 'z' -> true | _ -> false
+
 let append_to_list_ref x xs = xs := x :: !xs
 
 let string_of_list src = "[" ^ String.concat "; " src ^ "]"
@@ -385,6 +387,7 @@ type typ =
   | TyCustom of string
   | TyVar of string
   | TyCtorApp of (typ * string)
+  | TyArgs of typ list
 
 type ast =
   | UnitValue
@@ -848,20 +851,33 @@ let parse tokens =
     | KwString :: tokens -> (tokens, TyString)
     | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)
     | Ident typename :: tokens -> (tokens, TyCustom typename)
-    | LParen :: tokens -> (
-        let tokens, typ = parse_typexpr tokens in
-        match tokens with
-        | RParen :: tokens -> (tokens, typ)
-        | _ -> raise Unexpected_token )
+    | LParen :: _ ->
+        failwith "Any token LParen should be handled in parse_typexpr_ctor_app"
     | _ -> raise Unexpected_token
   and parse_typexpr_ctor_app tokens =
-    let rec aux typexpr = function
-      | Ident typectorname :: tokens ->
-          aux (TyCtorApp (typexpr, typectorname)) tokens
-      | tokens -> (tokens, typexpr)
+    let tokens, lhs =
+      match tokens with
+      | LParen :: tokens ->
+          let tokens, typexpr = parse_typexpr tokens in
+          let rec aux types = function
+            | Comma :: tokens ->
+                let tokens, typexpr = parse_typexpr tokens in
+                aux (typexpr :: types) tokens
+            | RParen :: tokens -> (tokens, types)
+            | _ -> raise Unexpected_token
+          in
+          let tokens, types = aux [typexpr] tokens in
+          let types = List.rev types in
+          ( tokens
+          , if List.length types = 1 then List.hd types else TyArgs types )
+      | _ -> parse_typexpr_primary tokens
     in
-    let tokens, typexpr = parse_typexpr_primary tokens in
-    aux typexpr tokens
+    let rec aux lhs = function
+      | Ident typectorname :: tokens when is_lower typectorname.[0] ->
+          aux (TyCtorApp (lhs, typectorname)) tokens
+      | tokens -> (tokens, lhs)
+    in
+    aux lhs tokens
   and parse_typexpr_tuple tokens =
     let rec aux lhs = function
       | Star :: tokens ->

@@ -1166,7 +1166,7 @@ test (eval (parse (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))) 10
 
 let ignore _ = ()
 
-type 'a hashmap = (string * 'a) list
+type ('a, 'b) hashmap = ('a * 'b) list
 
 let hashmap_empty = []
 
@@ -1214,6 +1214,8 @@ let hashmap_union f m1 m2 =
       | Some v1, Some v2 -> f k v1 v2 )
     m1 m2
 
+let hashmap_cardinal m = length m
+
 ;;
 let m = hashmap_empty in
 (* Thanks to: https://github.com/stereobooster/programming-languages-genealogical-tree *)
@@ -1236,3 +1238,29 @@ test (hashmap_find "SML" m) 1990 ;
 test (hashmap_find "OCaml" m) 1996 ;
 test (hashmap_find "Caml" m) 1987 ;
 test (hashmap_find "ANSI C" m) 1989
+
+type ('a, 'b) hashtbl = ('a, 'b) hashmap ref
+
+let hashtbl_create size_hint = ref hashmap_empty
+
+let hashtbl_add tbl k v = tbl := hashmap_add k v !tbl
+
+let hashtbl_mem tbl k = hashmap_mem k !tbl
+
+let hashtbl_find tbl k = hashmap_find k !tbl
+
+let hashtbl_length tbl = hashmap_cardinal !tbl
+
+;;
+let m = hashtbl_create 16 in
+hashtbl_add m "ML" 1977 ;
+hashtbl_add m "SML" 1984 ;
+hashtbl_add m "Caml" 1987 ;
+hashtbl_add m "OCaml" 1996 ;
+test (hashtbl_find m "SML") 1984 ;
+test (hashtbl_find m "OCaml") 1996 ;
+test (try hashtbl_find m "C" with Not_found -> -1) (-1) ;
+test (try hashtbl_find m "ML" with Not_found -> -1) 1977 ;
+test (hashtbl_mem m "ML") true ;
+test (hashtbl_mem m "C") false ;
+test (hashtbl_length m) 4
