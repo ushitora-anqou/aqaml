@@ -432,7 +432,6 @@ type ast =
   | RefAssign of ast * ast
   | Deref of ast
   | ExpDef of string * typ option
-  | ExpPreDef of string * typ option
   | TryWith of ast * (pattern * ast option * ast) list
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
@@ -1126,7 +1125,6 @@ let analyze ast =
              (function
                | DefTypeAlias _ as ast -> ast
                | DefVariant (type_param, typename, ctornames) ->
-                   let typename = make_id typename in
                    List.iter
                      (fun (ctorname, _) ->
                        Hashtbl.add toplevel.ctors_type ctorname typename )
@@ -1134,10 +1132,6 @@ let analyze ast =
                    DefVariant (type_param, typename, ctornames))
              entries)
     | ExpDef (expname, components) ->
-        let gen_expname = make_id expname in
-        Hashtbl.add toplevel.exps expname gen_expname ;
-        ExpDef (gen_expname, components)
-    | ExpPreDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
         ExpDef (expname, components)
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
@@ -2213,8 +2207,8 @@ let tokens = tokenize program in
 let asts = parse tokens in
 let asts =
   ExprSeq
-    [ ExpPreDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
-    ; ExpPreDef ("Not_found", None)
+    [ ExpDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
+    ; ExpDef ("Not_found", None)
     ; asts ]
 in
 let code = generate (analyze asts) in

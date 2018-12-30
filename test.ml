@@ -770,7 +770,7 @@ test
   | _ -> 1 )
   19
 
-type furikake =
+type furikake2 =
   | Noritama
   | Okaka
   | Syake
@@ -908,7 +908,7 @@ let find lst t =
 in
 test (find ["1"; "2"; "3"] "2") true
 
-type ('a, 'b) hashmap = Data of ('a * 'b) list
+type ('a, 'b) hashmap2 = Data of ('a * 'b) list
 
 ;;
 let create () = Data [] in
@@ -1042,13 +1042,13 @@ exception TestExc
 ;;
 test (try raise TestExc with TestExc -> 10) 10
 
-exception TestExc of string
+exception TestExc2 of string
 
 ;;
-test (try raise (TestExc "debug") with TestExc str -> str) "debug" ;
+test (try raise (TestExc2 "debug") with TestExc2 str -> str) "debug" ;
 test
-  ( try (try 10 with Not_found -> 1) + raise (TestExc "str")
-    with TestExc _ -> 5 )
+  ( try (try 10 with Not_found -> 1) + raise (TestExc2 "str")
+    with TestExc2 _ -> 5 )
   5
 
 ;;
