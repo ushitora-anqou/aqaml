@@ -1264,3 +1264,5 @@ test (try hashtbl_find m "ML" with Not_found -> -1) 1977 ;
 test (hashtbl_mem m "ML") true ;
 test (hashtbl_mem m "C") false ;
 test (hashtbl_length m) 4
+
+type testrecord1 = {testrecord1_int: int; testrecord1_str: string}

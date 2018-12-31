@@ -131,6 +131,9 @@ type token =
   | Lsr
   | Asr
   | DotLBracket
+  | Colon
+  | LBrace
+  | RBrace
 
 exception Unexpected_token
 
@@ -191,6 +194,9 @@ let string_of_token = function
   | Lsr -> "lsr"
   | Asr -> "asr"
   | DotLBracket -> ".["
+  | Colon -> ":"
+  | LBrace -> "{"
+  | RBrace -> "}"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -338,6 +344,8 @@ let tokenize program =
       | '^' -> Hat :: aux i
       | '@' -> Naruto :: aux i
       | '!' -> Exclam :: aux i
+      | '{' -> LBrace :: aux i
+      | '}' -> RBrace :: aux i
       | '.' -> (
           let i, ch = next_char i in
           match ch with
@@ -360,7 +368,7 @@ let tokenize program =
           match ch with
           | ':' -> ColonColon :: aux i
           | '=' -> ColonEqual :: aux i
-          | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
+          | _ -> Colon :: aux (i - 1) )
       | ';' -> (
           let i, ch = next_char i in
           match ch with
@@ -443,6 +451,7 @@ and pattern = ast
 and typedef =
   | DefVariant of typ option * string * (string * typ option) list
   | DefTypeAlias of typ option * string * typ
+  | DefRecord of (string * typ) list
 
 exception Unexpected_ast
 
@@ -938,6 +947,17 @@ let parse tokens =
           match tokens with
           | Ident str :: _ when is_capital str.[0] -> parse_variant tokens
           | Bar :: _ -> parse_variant tokens
+          | LBrace :: Ident fieldname :: Colon :: tokens ->
+              let rec aux fields = function
+                | Semicolon :: Ident fieldname :: Colon :: tokens ->
+                    let tokens, typexpr = parse_typexpr tokens in
+                    aux ((fieldname, typexpr) :: fields) tokens
+                | RBrace :: tokens -> (tokens, fields)
+                | _ -> raise Unexpected_token
+              in
+              let tokens, typexpr = parse_typexpr tokens in
+              let tokens, fields = aux [(fieldname, typexpr)] tokens in
+              (tokens, DefRecord fields)
           | tokens ->
               let tokens, typ = parse_typexpr tokens in
               (tokens, DefTypeAlias (type_param, typename, typ)) )
@@ -1129,7 +1149,8 @@ let analyze ast =
                      (fun (ctorname, _) ->
                        Hashtbl.add toplevel.ctors_type ctorname typename )
                      ctornames ;
-                   DefVariant (type_param, typename, ctornames))
+                   DefVariant (type_param, typename, ctornames)
+               | DefRecord fields -> DefRecord fields)
              entries)
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
@@ -1974,7 +1995,8 @@ let rec generate (letfuncs, strings) =
                 List.iteri
                   (fun i (ctorname, _) ->
                     Hashtbl.add ctors_id (typename, ctorname) i )
-                  ctornames)
+                  ctornames
+            | DefRecord _ -> ())
           entries ;
         "push 0 /* dummy */"
     | ExpDef (expname, _) ->
