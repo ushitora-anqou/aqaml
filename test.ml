@@ -1276,3 +1276,10 @@ test
   ( {testrecord1_int= 10; testrecord1_str= "abc"}
   = {testrecord1_str= "adc"; testrecord1_int= 10} )
   false
+
+;;
+test {testrecord1_int= 10; testrecord1_str= "abc"}.testrecord1_int 10 ;
+let h = {testrecord1_int= 10; testrecord1_str= "abc"} in
+test h.testrecord1_str "abc" ;
+let f a b = {testrecord1_int= a; testrecord1_str= b} in
+test (f 50 "kekeke").testrecord1_str "kekeke"

@@ -404,6 +404,7 @@ type ast =
   | StringValue of string * string
   | TupleValue of ast list
   | RecordValue of string option * (string * ast) list
+  | RecordDotAccess of string option * ast * string
   | Add of ast * ast
   | Sub of ast * ast
   | Mul of ast * ast
@@ -478,20 +479,23 @@ let rec varnames_in_pattern = function
 let parse tokens =
   let is_primary = function
     | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | Ident _ | LRBracket
-      | LParen | LBracket | LRParen )
+      | LParen | LBracket | LRParen | LBrace )
       :: _ ->
         true
     | _ -> false
   in
+  let is_dot = function (Dot | DotLBracket) :: _ -> true | _ -> false in
   let is_prefix tokens =
-    is_primary tokens || match tokens with Exclam :: _ -> true | _ -> false
+    is_primary tokens || is_dot tokens
+    || match tokens with Exclam :: _ -> true | _ -> false
   in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | CharLiteral ch :: tokens -> (tokens, CharValue ch)
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
-    | Ident modname :: Dot :: Ident varname :: tokens ->
+    | Ident modname :: Dot :: Ident varname :: tokens
+      when is_capital modname.[0] ->
         (tokens, Var (modname ^ "." ^ varname))
     | Ident id :: tokens ->
         (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
@@ -525,9 +529,11 @@ let parse tokens =
         let tokens, fields = aux [(fieldname, ast)] tokens in
         (tokens, RecordValue (None, fields))
     | _ -> raise Unexpected_token
-  and parse_dot_lparen tokens =
+  and parse_dot tokens =
     let tokens, lhs = parse_primary tokens in
     match tokens with
+    | Dot :: Ident fieldname :: tokens ->
+        (tokens, RecordDotAccess (None, lhs, fieldname))
     | DotLBracket :: tokens -> (
         let tokens, rhs = parse_expression tokens in
         match tokens with
@@ -539,9 +545,9 @@ let parse tokens =
     | _ -> (tokens, lhs)
   and parse_prefix = function
     | Exclam :: tokens ->
-        let tokens, ast = parse_dot_lparen tokens in
+        let tokens, ast = parse_dot tokens in
         (tokens, Deref ast)
-    | tokens -> parse_dot_lparen tokens
+    | tokens -> parse_dot tokens
   and parse_funccall tokens =
     let rec aux tokens =
       if is_prefix tokens then
@@ -1109,6 +1115,9 @@ let analyze ast =
         RecordValue
           ( Some typename
           , List.map (fun (name, ast) -> (name, aux env ast)) fields )
+    | RecordDotAccess (None, ast, fieldname) ->
+        let typename = Hashtbl.find toplevel.records fieldname in
+        RecordDotAccess (Some typename, aux env ast, fieldname)
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -1695,6 +1704,14 @@ let rec generate (letfuncs, strings) =
           fields ;
         appfmt buf "push [rbp + %d]" offset ;
         appfmt buf "/* RecordValue %s END */" typename ;
+        Buffer.contents buf
+    | RecordDotAccess (Some typename, ast, fieldname) ->
+        let idx = Hashtbl.find records_idx (typename, fieldname) in
+        let buf = Buffer.create 128 in
+        appfmt buf "/* RecordDotAccess %s %s */" typename fieldname ;
+        appstr buf @@ aux env ast ;
+        appstr buf "pop rax" ;
+        appfmt buf "push [rax + %d]" (idx * 8) ;
         Buffer.contents buf
     | Add (lhs, rhs) ->
         String.concat "\n"
