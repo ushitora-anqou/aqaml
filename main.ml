@@ -404,6 +404,7 @@ type ast =
   | StringValue of string * string
   | TupleValue of ast list
   | RecordValue of string option * (string * ast) list
+  | RecordValueWith of ast * (string * ast) list
   | RecordDotAccess of string option * ast * string
   | Add of ast * ast
   | Sub of ast * ast
@@ -528,6 +529,21 @@ let parse tokens =
         let tokens, ast = parse_let tokens in
         let tokens, fields = aux [(fieldname, ast)] tokens in
         (tokens, RecordValue (None, fields))
+    | LBrace :: tokens -> (
+        let tokens, base = parse_primary tokens in
+        match tokens with
+        | With :: Ident fieldname :: Equal :: tokens ->
+            let rec aux fields = function
+              | Semicolon :: Ident fieldname :: Equal :: tokens ->
+                  let tokens, ast = parse_let tokens in
+                  aux ((fieldname, ast) :: fields) tokens
+              | RBrace :: tokens -> (tokens, fields)
+              | _ -> raise Unexpected_token
+            in
+            let tokens, ast = parse_let tokens in
+            let tokens, fields = aux [(fieldname, ast)] tokens in
+            (tokens, RecordValueWith (base, fields))
+        | _ -> raise Unexpected_token )
     | _ -> raise Unexpected_token
   and parse_dot tokens =
     let tokens, lhs = parse_primary tokens in
@@ -1042,7 +1058,8 @@ type type_toplevel =
   ; strings: ast list ref
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
-  ; records: (string, string) Hashtbl.t }
+  ; records: (string, string) Hashtbl.t
+  ; records_fields: (string, string list) Hashtbl.t }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1053,7 +1070,8 @@ let analyze ast =
     ; strings= ref []
     ; ctors_type= Hashtbl.create 16
     ; exps= Hashtbl.create 16
-    ; records= Hashtbl.create 16 }
+    ; records= Hashtbl.create 16
+    ; records_fields= Hashtbl.create 16 }
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -1115,6 +1133,25 @@ let analyze ast =
         RecordValue
           ( Some typename
           , List.map (fun (name, ast) -> (name, aux env ast)) fields )
+    | RecordValueWith (base, fields) ->
+        let key_fieldname, _ = List.hd fields in
+        let typename = Hashtbl.find toplevel.records key_fieldname in
+        let fieldnames = Hashtbl.find toplevel.records_fields typename in
+        let fields = hashmap_of_list fields in
+        let new_base = Var (make_id "var") in
+        aux env
+        @@ LetAnd
+             ( false
+             , [([new_base], base)]
+             , RecordValue
+                 ( None
+                 , List.map
+                     (fun fieldname ->
+                       try (fieldname, HashMap.find fieldname fields)
+                       with Not_found ->
+                         ( fieldname
+                         , RecordDotAccess (None, new_base, fieldname) ) )
+                     fieldnames ) )
     | RecordDotAccess (None, ast, fieldname) ->
         let typename = Hashtbl.find toplevel.records fieldname in
         RecordDotAccess (Some typename, aux env ast, fieldname)
@@ -1184,6 +1221,8 @@ let analyze ast =
                      (fun (fieldname, _) ->
                        Hashtbl.add toplevel.records fieldname typename )
                      fields ;
+                   Hashtbl.add toplevel.records_fields typename
+                   @@ List.map (fun (fieldname, _) -> fieldname) fields ;
                    DefRecord (typename, fields))
              entries)
     | ExpDef (expname, components) ->

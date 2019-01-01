@@ -1283,3 +1283,10 @@ let h = {testrecord1_int= 10; testrecord1_str= "abc"} in
 test h.testrecord1_str "abc" ;
 let f a b = {testrecord1_int= a; testrecord1_str= b} in
 test (f 50 "kekeke").testrecord1_str "kekeke"
+
+;;
+let h = {testrecord1_int= 10; testrecord1_str= "abc"} in
+test
+  {h with testrecord1_str= "def"}
+  {testrecord1_int= 10; testrecord1_str= "def"} ;
+test {{testrecord1_int= 20; testrecord1_str= "abc"} with testrecord1_int= 10} h
