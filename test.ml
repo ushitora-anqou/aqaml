@@ -1266,3 +1266,13 @@ test (hashtbl_mem m "C") false ;
 test (hashtbl_length m) 4
 
 type testrecord1 = {testrecord1_int: int; testrecord1_str: string}
+
+;;
+test
+  ( {testrecord1_int= 10; testrecord1_str= "abc"}
+  = {testrecord1_str= "abc"; testrecord1_int= 10} )
+  true ;
+test
+  ( {testrecord1_int= 10; testrecord1_str= "abc"}
+  = {testrecord1_str= "adc"; testrecord1_int= 10} )
+  false

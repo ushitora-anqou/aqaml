@@ -403,6 +403,7 @@ type ast =
   | CharValue of char
   | StringValue of string * string
   | TupleValue of ast list
+  | RecordValue of string option * (string * ast) list
   | Add of ast * ast
   | Sub of ast * ast
   | Mul of ast * ast
@@ -451,7 +452,7 @@ and pattern = ast
 and typedef =
   | DefVariant of typ option * string * (string * typ option) list
   | DefTypeAlias of typ option * string * typ
-  | DefRecord of (string * typ) list
+  | DefRecord of string * (string * typ) list
 
 exception Unexpected_ast
 
@@ -512,6 +513,17 @@ let parse tokens =
         let tokens, car = parse_let tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
+    | LBrace :: Ident fieldname :: Equal :: tokens ->
+        let rec aux fields = function
+          | Semicolon :: Ident fieldname :: Equal :: tokens ->
+              let tokens, ast = parse_let tokens in
+              aux ((fieldname, ast) :: fields) tokens
+          | RBrace :: tokens -> (tokens, fields)
+          | _ -> raise Unexpected_token
+        in
+        let tokens, ast = parse_let tokens in
+        let tokens, fields = aux [(fieldname, ast)] tokens in
+        (tokens, RecordValue (None, fields))
     | _ -> raise Unexpected_token
   and parse_dot_lparen tokens =
     let tokens, lhs = parse_primary tokens in
@@ -957,7 +969,7 @@ let parse tokens =
               in
               let tokens, typexpr = parse_typexpr tokens in
               let tokens, fields = aux [(fieldname, typexpr)] tokens in
-              (tokens, DefRecord fields)
+              (tokens, DefRecord (typename, fields))
           | tokens ->
               let tokens, typ = parse_typexpr tokens in
               (tokens, DefTypeAlias (type_param, typename, typ)) )
@@ -1023,7 +1035,8 @@ type type_toplevel =
   { letfuncs: ast list ref
   ; strings: ast list ref
   ; ctors_type: (string, string) Hashtbl.t
-  ; exps: (string, string) Hashtbl.t }
+  ; exps: (string, string) Hashtbl.t
+  ; records: (string, string) Hashtbl.t }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1033,7 +1046,8 @@ let analyze ast =
     { letfuncs= ref []
     ; strings= ref []
     ; ctors_type= Hashtbl.create 16
-    ; exps= Hashtbl.create 16 }
+    ; exps= Hashtbl.create 16
+    ; records= Hashtbl.create 16 }
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -1089,6 +1103,12 @@ let analyze ast =
         append_to_list_ref ast toplevel.strings ;
         ast
     | TupleValue values -> TupleValue (List.map (aux env) values)
+    | RecordValue (None, fields) ->
+        let key_fieldname, _ = List.hd fields in
+        let typename = Hashtbl.find toplevel.records key_fieldname in
+        RecordValue
+          ( Some typename
+          , List.map (fun (name, ast) -> (name, aux env ast)) fields )
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -1150,7 +1170,12 @@ let analyze ast =
                        Hashtbl.add toplevel.ctors_type ctorname typename )
                      ctornames ;
                    DefVariant (type_param, typename, ctornames)
-               | DefRecord fields -> DefRecord fields)
+               | DefRecord (typename, fields) ->
+                   List.iter
+                     (fun (fieldname, _) ->
+                       Hashtbl.add toplevel.records fieldname typename )
+                     fields ;
+                   DefRecord (typename, fields))
              entries)
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
@@ -1402,6 +1427,7 @@ let rec generate (letfuncs, strings) =
   let stack_size = ref 0 in
   let ctors_id = Hashtbl.create 16 in
   let exps_id = Hashtbl.create 16 in
+  let records_idx = Hashtbl.create 16 in
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -1652,6 +1678,24 @@ let rec generate (letfuncs, strings) =
                  values)
           ; "push rax"
           ; "/* TupleValue END */" ]
+    | RecordValue (Some typename, fields) ->
+        let offset = env.offset - 8 in
+        stack_size := max !stack_size (-offset) ;
+        let buf = Buffer.create 128 in
+        appfmt buf "/* RecordValue %s BEGIN */" typename ;
+        appstr buf @@ gen_alloc_block (List.length fields) 0 1 ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        List.iter
+          (fun (fieldname, ast) ->
+            appstr buf @@ aux env ast ;
+            appstr buf "pop rax" ;
+            appfmt buf "mov rdi, [rbp + %d]" offset ;
+            let idx = Hashtbl.find records_idx (typename, fieldname) in
+            appfmt buf "mov [rdi + %d], rax" (idx * 8) )
+          fields ;
+        appfmt buf "push [rbp + %d]" offset ;
+        appfmt buf "/* RecordValue %s END */" typename ;
+        Buffer.contents buf
     | Add (lhs, rhs) ->
         String.concat "\n"
           [ aux env lhs
@@ -1996,7 +2040,11 @@ let rec generate (letfuncs, strings) =
                   (fun i (ctorname, _) ->
                     Hashtbl.add ctors_id (typename, ctorname) i )
                   ctornames
-            | DefRecord _ -> ())
+            | DefRecord (typename, fields) ->
+                List.iteri
+                  (fun i (fieldname, _) ->
+                    Hashtbl.add records_idx (typename, fieldname) i )
+                  fields)
           entries ;
         "push 0 /* dummy */"
     | ExpDef (expname, _) ->
