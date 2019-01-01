@@ -444,6 +444,7 @@ type ast =
   | Deref of ast
   | ExpDef of string * typ option
   | TryWith of ast * (pattern * ast option * ast) list
+  | Nope
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -1056,6 +1057,7 @@ let add_symbols_in_patterns symbols ptns =
 type type_toplevel =
   { letfuncs: ast list ref
   ; strings: ast list ref
+  ; typedefs: typedef list ref
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
   ; records: (string, string) Hashtbl.t
@@ -1068,6 +1070,7 @@ let analyze ast =
   let toplevel =
     { letfuncs= ref []
     ; strings= ref []
+    ; typedefs= ref []
     ; ctors_type= Hashtbl.create 16
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
@@ -1206,25 +1209,24 @@ let analyze ast =
           , ctorname
           , None )
     | TypeAnd entries ->
-        TypeAnd
-          (List.map
-             (function
-               | DefTypeAlias _ as ast -> ast
-               | DefVariant (type_param, typename, ctornames) ->
-                   List.iter
-                     (fun (ctorname, _) ->
-                       Hashtbl.add toplevel.ctors_type ctorname typename )
-                     ctornames ;
-                   DefVariant (type_param, typename, ctornames)
-               | DefRecord (typename, fields) ->
-                   List.iter
-                     (fun (fieldname, _) ->
-                       Hashtbl.add toplevel.records fieldname typename )
-                     fields ;
-                   Hashtbl.add toplevel.records_fields typename
-                   @@ List.map (fun (fieldname, _) -> fieldname) fields ;
-                   DefRecord (typename, fields))
-             entries)
+        toplevel.typedefs := List.rev_append !(toplevel.typedefs) entries ;
+        List.iter
+          (function
+            | DefTypeAlias _ -> ()
+            | DefVariant (type_param, typename, ctornames) ->
+                List.iter
+                  (fun (ctorname, _) ->
+                    Hashtbl.add toplevel.ctors_type ctorname typename )
+                  ctornames
+            | DefRecord (typename, fields) ->
+                List.iter
+                  (fun (fieldname, _) ->
+                    Hashtbl.add toplevel.records fieldname typename )
+                  fields ;
+                Hashtbl.add toplevel.records_fields typename
+                @@ List.map (fun (fieldname, _) -> fieldname) fields)
+          entries ;
+        Nope
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
         ExpDef (expname, components)
@@ -1467,15 +1469,28 @@ let analyze ast =
   in
   let ast = LetFunc (false, "aqaml_main", [UnitValue], aux env ast, []) in
   append_to_list_ref ast toplevel.letfuncs ;
-  (!(toplevel.letfuncs), !(toplevel.strings))
+  (!(toplevel.letfuncs), !(toplevel.strings), !(toplevel.typedefs))
 
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
-let rec generate (letfuncs, strings) =
+let rec generate (letfuncs, strings, typedefs) =
   let stack_size = ref 0 in
-  let ctors_id = Hashtbl.create 16 in
-  let exps_id = Hashtbl.create 16 in
   let records_idx = Hashtbl.create 16 in
+  let ctors_id = Hashtbl.create 16 in
+  List.iter
+    (function
+      | DefTypeAlias _ -> ()
+      | DefVariant (_, typename, ctornames) ->
+          List.iteri
+            (fun i (ctorname, _) -> Hashtbl.add ctors_id (typename, ctorname) i)
+            ctornames
+      | DefRecord (typename, fields) ->
+          List.iteri
+            (fun i (fieldname, _) ->
+              Hashtbl.add records_idx (typename, fieldname) i )
+            fields)
+    typedefs ;
+  let exps_id = Hashtbl.create 16 in
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -1697,6 +1712,7 @@ let rec generate (letfuncs, strings) =
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   and aux env = function
+    | Nope -> "push 0 /* dummy */"
     | IntValue num -> sprintf "push %d" (tagged_int num)
     | CharValue ch -> aux env @@ IntValue (Char.code ch)
     | UnitValue | EmptyList -> aux env (IntValue 0)
@@ -2087,22 +2103,6 @@ let rec generate (letfuncs, strings) =
         appfmt buf "%s:" exit_label ;
         appstr buf "/* TryWith END */" ;
         Buffer.contents buf
-    | TypeAnd entries ->
-        List.iter
-          (function
-            | DefTypeAlias _ -> ()
-            | DefVariant (_, typename, ctornames) ->
-                List.iteri
-                  (fun i (ctorname, _) ->
-                    Hashtbl.add ctors_id (typename, ctorname) i )
-                  ctornames
-            | DefRecord (typename, fields) ->
-                List.iteri
-                  (fun i (fieldname, _) ->
-                    Hashtbl.add records_idx (typename, fieldname) i )
-                  fields)
-          entries ;
-        "push 0 /* dummy */"
     | ExpDef (expname, _) ->
         Hashtbl.add exps_id expname @@ Hashtbl.length exps_id ;
         "push 0 /* dummy */"
