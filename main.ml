@@ -1058,6 +1058,7 @@ type type_toplevel =
   { letfuncs: ast list ref
   ; strings: ast list ref
   ; typedefs: typedef list ref
+  ; exps_list: string list ref
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
   ; records: (string, string) Hashtbl.t
@@ -1071,6 +1072,7 @@ let analyze ast =
     { letfuncs= ref []
     ; strings= ref []
     ; typedefs= ref []
+    ; exps_list= ref []
     ; ctors_type= Hashtbl.create 16
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
@@ -1229,7 +1231,8 @@ let analyze ast =
         Nope
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
-        ExpDef (expname, components)
+        toplevel.exps_list := expname :: !(toplevel.exps_list) ;
+        Nope
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with
       | CtorApp (typename, ctorname, None) when List.length args = 1 ->
@@ -1469,11 +1472,14 @@ let analyze ast =
   in
   let ast = LetFunc (false, "aqaml_main", [UnitValue], aux env ast, []) in
   append_to_list_ref ast toplevel.letfuncs ;
-  (!(toplevel.letfuncs), !(toplevel.strings), !(toplevel.typedefs))
+  ( !(toplevel.letfuncs)
+  , !(toplevel.strings)
+  , !(toplevel.typedefs)
+  , !(toplevel.exps_list) )
 
 type gen_environment = {offset: int; varoffset: int HashMap.t}
 
-let rec generate (letfuncs, strings, typedefs) =
+let rec generate (letfuncs, strings, typedefs, exps) =
   let stack_size = ref 0 in
   let records_idx = Hashtbl.create 16 in
   let ctors_id = Hashtbl.create 16 in
@@ -1491,6 +1497,9 @@ let rec generate (letfuncs, strings, typedefs) =
             fields)
     typedefs ;
   let exps_id = Hashtbl.create 16 in
+  List.iter
+    (fun expname -> Hashtbl.add exps_id expname @@ Hashtbl.length exps_id)
+    exps ;
   let reg_of_index = function
     | 0 -> "rax"
     | 1 -> "rbx"
@@ -2103,9 +2112,6 @@ let rec generate (letfuncs, strings, typedefs) =
         appfmt buf "%s:" exit_label ;
         appstr buf "/* TryWith END */" ;
         Buffer.contents buf
-    | ExpDef (expname, _) ->
-        Hashtbl.add exps_id expname @@ Hashtbl.length exps_id ;
-        "push 0 /* dummy */"
     | _ -> raise Unexpected_ast
   in
   let strings_code =
