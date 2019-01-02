@@ -1308,7 +1308,8 @@ let analyze ast =
         let let_closures_freevars = ref [] in
         let should_be_closure = ref false in
         let rec analyze_lets first =
-          let toplevel_backup = toplevel in
+          let toplevel_letfuncs_backup = !(toplevel.letfuncs) in
+          let toplevel_strings_backup = !(toplevel.strings) in
           let funcvars =
             hashmap_of_list
             @@ filter_after_map
@@ -1448,8 +1449,8 @@ let analyze ast =
               (env, []) src
           in
           if first && !should_be_closure then (
-            toplevel.letfuncs := !(toplevel_backup.letfuncs) ;
-            toplevel.strings := !(toplevel_backup.strings) ;
+            toplevel.letfuncs := toplevel_letfuncs_backup ;
+            toplevel.strings := toplevel_strings_backup ;
             let_closures_freevars := list_unique !let_closures_freevars ;
             analyze_lets false )
           else LetAndAnalyzed (lets, aux env' rhs_of_in)
