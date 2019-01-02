@@ -1303,3 +1303,78 @@ end
 test (TestModule1.hoge 10) 12 ;
 test TestModule1.Katsuo TestModule1.Katsuo ;
 test (TestModule1.f ()) 12
+
+exception Failure of string
+
+let failwith str = raise (Failure str)
+
+module List = struct
+  let rec length = function _ :: xs -> 1 + length xs | _ -> 0
+
+  let rec fold_left f a bs =
+    match bs with b :: bs -> fold_left f (f a b) bs | _ -> a
+
+  let rev lst =
+    let rec aux acc = function x :: xs -> aux (x :: acc) xs | [] -> acc in
+    aux [] lst
+
+  let rec iter f = function x :: xs -> f x ; iter f xs | [] -> ()
+
+  let rec iteri f =
+    let rec aux i = function
+      | x :: xs ->
+          f i x ;
+          aux (i + 1) xs
+      | [] -> ()
+    in
+    aux 0
+
+  let map f lst =
+    let rec aux acc = function x :: xs -> aux (f x :: acc) xs | [] -> acc in
+    List.rev (aux [] lst)
+
+  let mapi f lst =
+    let rec aux i acc = function
+      | x :: xs -> aux (i + 1) (f i x :: acc) xs
+      | [] -> acc
+    in
+    List.rev (aux 0 [] lst)
+
+  let rec rev_append l1 l2 =
+    match l1 with x :: xs -> rev_append xs (x :: l2) | [] -> l2
+
+  (* TODO: this 'rec' is needed due to missing implementation *)
+  let rec hd = function x :: xs -> x | [] -> failwith "hd"
+
+  let rec concat = function x :: xs -> x @ concat xs | [] -> []
+
+  let flatten lst = concat lst
+
+  let filter f lst =
+    let rec aux acc = function
+      | x :: xs -> aux (if f x then x :: acc else acc) xs
+      | [] -> acc
+    in
+    List.rev (aux [] lst)
+end
+
+;;
+test (List.length [1; 2; 3]) 3 ;
+test (List.fold_left (fun a b -> (a - b) * 2) 100 [1; 2; 3]) 778 ;
+test (List.map (fun x -> x * 10) [1; 2; 3]) [10; 20; 30] ;
+test (List.mapi (fun i x -> (x * 10) + i) [1; 2; 3]) [10; 21; 32] ;
+let sum = ref 0 in
+List.iter (fun x -> sum := !sum + x) [1; 2; 3] ;
+test !sum 6 ;
+let sum = ref 0 in
+List.iteri (fun i x -> sum := !sum + (x * i)) [1; 2; 3] ;
+test !sum 8 ;
+test (List.rev [1; 2; 3]) [3; 2; 1] ;
+let l1 = [2; 3; 4; 5] in
+let l2 = [1; -1; 0] in
+test (List.rev_append l1 l2) (List.rev l1 @ l2) ;
+test (List.hd [-1; 0; 2]) (-1) ;
+test (try List.hd [] with Failure _ -> 1) 1 ;
+test (List.concat [[1]; [2; 3]; [4; 5; 6]]) [1; 2; 3; 4; 5; 6] ;
+test (List.flatten [[1]; [2; 3]; [4; 5; 6]]) [1; 2; 3; 4; 5; 6] ;
+test (List.filter (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5; 6; 7]) [2; 4; 6]
