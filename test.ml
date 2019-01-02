@@ -1293,7 +1293,10 @@ test {{testrecord1_int= 20; testrecord1_str= "abc"} with testrecord1_int= 10} h
 
 module TestModule1 = struct
   let hoge n = n + 2
+
+  type furikake = Shake | Katsuo | Nori
 end
 
 ;;
-test (TestModule1.hoge 10) 12
+test (TestModule1.hoge 10) 12 ;
+test TestModule1.Katsuo TestModule1.Katsuo
