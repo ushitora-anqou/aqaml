@@ -1013,7 +1013,8 @@ let parse tokens =
         (tokens, ExpDef (expname, Some typ))
     | Ident expname :: tokens -> (tokens, ExpDef (expname, None))
     | _ -> raise Unexpected_token
-  and parse_expressions tokens =
+  in
+  let parse_expressions_and_definitions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
      * are converted to (maybe large) one ExprSeq, and all 'let' without 'in'
      * come to have their following expressions as their 'in' part.
@@ -1034,7 +1035,7 @@ let parse tokens =
     in
     List.rev @@ aux [] tokens
   in
-  parse_expressions tokens
+  parse_expressions_and_definitions tokens
 
 type environment =
   { symbols: ast HashMap.t
