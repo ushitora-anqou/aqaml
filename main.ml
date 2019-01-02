@@ -134,6 +134,9 @@ type token =
   | Colon
   | LBrace
   | RBrace
+  | Module
+  | Struct
+  | End
 
 exception Unexpected_token
 
@@ -197,6 +200,9 @@ let string_of_token = function
   | Colon -> ":"
   | LBrace -> "{"
   | RBrace -> "}"
+  | Module -> "module"
+  | Struct -> "struct"
+  | End -> "end"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -330,6 +336,9 @@ let tokenize program =
           | "lsl" -> Lsl
           | "lsr" -> Lsr
           | "asr" -> Asr
+          | "module" -> Module
+          | "struct" -> Struct
+          | "end" -> End
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -445,6 +454,7 @@ type ast =
   | ExpDef of string * typ option
   | TryWith of ast * (pattern * ast option * ast) list
   | Nope
+  | ModuleDef of string * ast list
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -1020,20 +1030,28 @@ let parse tokens =
      * come to have their following expressions as their 'in' part.
      * This change makes later processes such as semantic analysis easier. *)
     (* TODO: correct? *)
+    (* TODO: not correct. definitions and expressions should be completely separated. *)
     let rec aux exprs = function
       | SemicolonSemicolon :: tokens -> aux exprs tokens
-      | [] -> exprs
+      | [] -> ([], List.rev exprs)
       | Type :: tokens ->
           let tokens, expr = parse_type_def tokens in
           aux (expr :: exprs) tokens
       | Exception :: tokens ->
           let tokens, expr = parse_exp_def tokens in
           aux (expr :: exprs) tokens
+      | Module :: Ident modulename :: Equal :: Struct :: tokens ->
+          let tokens, asts = aux [] tokens in
+          let ast = ModuleDef (modulename, asts) in
+          aux (ast :: exprs) tokens
+      | End :: tokens -> (* module end *)
+                         (tokens, List.rev exprs)
       | tokens ->
           let tokens, expr = parse_expression tokens in
           aux (expr :: exprs) tokens
     in
-    List.rev @@ aux [] tokens
+    let _, exprs = aux [] tokens in
+    exprs
   in
   parse_expressions_and_definitions tokens
 
@@ -1061,7 +1079,8 @@ type type_toplevel =
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
   ; records: (string, string) Hashtbl.t
-  ; records_fields: (string, string list) Hashtbl.t }
+  ; records_fields: (string, string list) Hashtbl.t
+  ; modulename: string list ref }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1077,7 +1096,16 @@ let analyze asts =
     ; ctors_type= Hashtbl.create 16
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
-    ; records_fields= Hashtbl.create 16 }
+    ; records_fields= Hashtbl.create 16
+    ; modulename= ref [] }
+  in
+  let name_with_modulename name =
+    String.concat "." @@ List.rev @@ (name :: !(toplevel.modulename))
+  in
+  let exprs2expr = function
+    | [] -> Nope
+    | [expr] -> expr
+    | exprs -> ExprSeq exprs
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -1291,10 +1319,12 @@ let analyze asts =
                         let rec id x = id;;
                     is ng. For now, we assume that 'let rec ...' expression is written properly.
                   *)
+                  let funcname = name_with_modulename funcname in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (true, funcname, [], rhs_of_eq, [])
               | [bind], rhs_of_eq -> LetVar (recursive, bind, rhs_of_eq)
               | Var funcname :: args, rhs_of_eq ->
+                  let funcname = name_with_modulename funcname in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (recursive, funcname, args, rhs_of_eq, [])
               | _ -> failwith "unexpected ast")
@@ -1462,6 +1492,12 @@ let analyze asts =
             | Some rhs -> LetAndAnalyzed (lets, aux env' rhs)
         in
         analyze_lets true
+    | ModuleDef (this_modulename, asts) ->
+        let modulename_backup = !(toplevel.modulename) in
+        toplevel.modulename := this_modulename :: !(toplevel.modulename) ;
+        let ast = exprs2expr @@ List.map (aux env) asts in
+        toplevel.modulename := modulename_backup ;
+        ast
     | _ -> raise Unexpected_ast
   in
   let env =
@@ -1478,11 +1514,6 @@ let analyze asts =
     ; freevars= ref [] }
   in
   let toplevel_env = ref env in
-  let exprs2expr = function
-    | [] -> Nope
-    | [expr] -> expr
-    | exprs -> ExprSeq exprs
-  in
   let rec analyze_toplevel exprs = function
     | ast :: asts -> (
       try analyze_toplevel (aux !toplevel_env ast :: exprs) asts

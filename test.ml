@@ -1290,3 +1290,10 @@ test
   {h with testrecord1_str= "def"}
   {testrecord1_int= 10; testrecord1_str= "def"} ;
 test {{testrecord1_int= 20; testrecord1_str= "abc"} with testrecord1_int= 10} h
+
+module TestModule1 = struct
+  let hoge n = n + 2
+end
+
+;;
+test (TestModule1.hoge 10) 12
