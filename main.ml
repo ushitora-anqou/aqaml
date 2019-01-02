@@ -427,7 +427,7 @@ type ast =
   | FuncVar of string * int
   | AppCls of (ast * ast list)
   | AppDir of (string * ast list)
-  | LetAnd of (bool * (pattern list * ast) list * ast)
+  | LetAnd of (bool * (pattern list * ast) list * ast option)
   | LetVar of (bool * pattern * ast)
   (* recursive?, funcname, args, function body, free variables *)
   | LetFunc of (bool * string * pattern list * ast * string list)
@@ -761,7 +761,7 @@ let parse tokens =
             let tokens, cases = parse_pattern_match tokens in
             (tokens, TryWith (cond, cases))
         | _ -> raise Unexpected_token )
-    | Let :: tokens ->
+    | Let :: tokens -> (
         let parse_let_binding tokens =
           let tokens, bind = parse_pattern tokens in
           match tokens with
@@ -795,12 +795,11 @@ let parse tokens =
         in
         let tokens, le = parse_let_binding tokens in
         let tokens, lets = aux' [le] tokens in
-        let tokens, rhs_of_in =
-          match tokens with
-          | In :: tokens -> parse_expression tokens
-          | _ -> parse_expressions tokens
-        in
-        (tokens, LetAnd (recursive, lets, rhs_of_in))
+        match tokens with
+        | In :: tokens ->
+            let tokens, rhs_of_in = parse_expression tokens in
+            (tokens, LetAnd (recursive, lets, Some rhs_of_in))
+        | _ -> (tokens, LetAnd (recursive, lets, None)) )
     | tokens -> parse_if tokens
   and parse_expr_sequence tokens =
     let rec aux = function
@@ -1033,10 +1032,9 @@ let parse tokens =
           let tokens, expr = parse_expression tokens in
           aux (expr :: exprs) tokens
     in
-    ([], ExprSeq (List.rev (aux [] tokens)))
+    List.rev @@ aux [] tokens
   in
-  let _, expr = parse_expressions tokens in
-  expr
+  parse_expressions tokens
 
 type environment =
   { symbols: ast HashMap.t
@@ -1067,7 +1065,9 @@ type type_toplevel =
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
 
-let analyze ast =
+exception LetDef of ast list * environment
+
+let analyze asts =
   let toplevel =
     { letfuncs= ref []
     ; strings= ref []
@@ -1148,15 +1148,16 @@ let analyze ast =
         @@ LetAnd
              ( false
              , [([new_base], base)]
-             , RecordValue
-                 ( None
-                 , List.map
-                     (fun fieldname ->
-                       try (fieldname, HashMap.find fieldname fields)
-                       with Not_found ->
-                         ( fieldname
-                         , RecordDotAccess (None, new_base, fieldname) ) )
-                     fieldnames ) )
+             , Some
+                 (RecordValue
+                    ( None
+                    , List.map
+                        (fun fieldname ->
+                          try (fieldname, HashMap.find fieldname fields)
+                          with Not_found ->
+                            ( fieldname
+                            , RecordDotAccess (None, new_base, fieldname) ) )
+                        fieldnames )) )
     | RecordDotAccess (None, ast, fieldname) ->
         let typename = Hashtbl.find toplevel.records fieldname in
         RecordDotAccess (Some typename, aux env ast, fieldname)
@@ -1186,7 +1187,8 @@ let analyze ast =
     | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
     | Lambda (args, body) ->
         let funcname = ".lambda" in
-        aux env @@ LetAnd (false, [(Var funcname :: args, body)], Var funcname)
+        aux env
+        @@ LetAnd (false, [(Var funcname :: args, body)], Some (Var funcname))
     | TryWith (cond, cases) ->
         TryWith (aux env cond, analyze_pattern_match_cases env cases)
     | MatchWith (cond, cases) ->
@@ -1453,7 +1455,10 @@ let analyze ast =
             toplevel.strings := toplevel_strings_backup ;
             let_closures_freevars := list_unique !let_closures_freevars ;
             analyze_lets false )
-          else LetAndAnalyzed (lets, aux env' rhs_of_in)
+          else
+            match rhs_of_in with
+            | None -> raise (LetDef (lets, env'))
+            | Some rhs -> LetAndAnalyzed (lets, aux env' rhs)
         in
         analyze_lets true
     | _ -> raise Unexpected_ast
@@ -1471,7 +1476,24 @@ let analyze ast =
     ; parent= None
     ; freevars= ref [] }
   in
-  let ast = LetFunc (false, "aqaml_main", [UnitValue], aux env ast, []) in
+  let toplevel_env = ref env in
+  let exprs2expr = function
+    | [] -> Nope
+    | [expr] -> expr
+    | exprs -> ExprSeq exprs
+  in
+  let rec analyze_toplevel exprs = function
+    | ast :: asts -> (
+      try analyze_toplevel (aux !toplevel_env ast :: exprs) asts
+      with LetDef (lets, env) ->
+        toplevel_env := env ;
+        exprs2expr @@ List.rev
+        @@ (LetAndAnalyzed (lets, analyze_toplevel [] asts) :: exprs) )
+    | [] -> exprs2expr @@ List.rev exprs
+  in
+  let ast =
+    LetFunc (false, "aqaml_main", [UnitValue], analyze_toplevel [] asts, [])
+  in
   append_to_list_ref ast toplevel.letfuncs ;
   ( !(toplevel.letfuncs)
   , !(toplevel.strings)
@@ -2339,10 +2361,9 @@ let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let asts = parse tokens in
 let asts =
-  ExprSeq
-    [ ExpDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
-    ; ExpDef ("Not_found", None)
-    ; asts ]
+  [ ExpDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
+  ; ExpDef ("Not_found", None) ]
+  @ asts
 in
 let code = generate (analyze asts) in
 print_string
