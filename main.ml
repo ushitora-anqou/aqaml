@@ -1111,9 +1111,14 @@ let analyze asts =
     | [expr] -> expr
     | exprs -> ExprSeq exprs
   in
+  let hashmap_find_with_modulename name hashmap =
+    try HashMap.find name hashmap with Not_found ->
+      HashMap.find (name_with_modulename name) hashmap
+  in
   let find_symbol env name =
     let rec aux depth env =
-      try (depth, HashMap.find name env.symbols) with Not_found -> (
+      try (depth, hashmap_find_with_modulename name env.symbols)
+      with Not_found -> (
         match env.parent with
         | Some parent -> aux (depth + 1) parent
         | None ->
