@@ -1348,12 +1348,20 @@ let analyze asts =
                         let rec id x = id;;
                     is ng. For now, we assume that 'let rec ...' expression is written properly.
                   *)
-                  let funcname = name_with_modulename funcname in
+                  let funcname =
+                    match rhs_of_in with
+                    | Some _ -> funcname
+                    | None -> name_with_modulename funcname
+                  in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (true, funcname, [], rhs_of_eq, [])
               | [bind], rhs_of_eq -> LetVar (recursive, bind, rhs_of_eq)
               | Var funcname :: args, rhs_of_eq ->
-                  let funcname = name_with_modulename funcname in
+                  let funcname =
+                    match rhs_of_in with
+                    | Some _ -> funcname
+                    | None -> name_with_modulename funcname
+                  in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (recursive, funcname, args, rhs_of_eq, [])
               | _ -> failwith "unexpected ast")
