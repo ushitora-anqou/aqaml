@@ -1234,10 +1234,11 @@ let analyze asts =
     | Var name -> (
       match find_symbol env name with
       | 0, (Var _ as sym) -> sym
+      | _, FuncVar (gen_funcname, 0) -> AppDir (gen_funcname, [])
       | 0, FuncVar (funcname, nargs) ->
           (* When FuncVar is processed here, AppDir will not be applied to this FuncVar.
-         * Therefore the returned value should be closured in case
-         * AppCls is applied to this value. *)
+           * Therefore the returned value should be closured in case
+           * AppCls is applied to this value. *)
           MakeCls (funcname, nargs, [])
       | _, (Var id as sym) ->
           env.freevars := (name, id) :: !(env.freevars) ;
