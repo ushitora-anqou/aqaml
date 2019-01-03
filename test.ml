@@ -1456,17 +1456,17 @@ test (HashMap.find "Caml" m) 1987 ;
 test (HashMap.find "ANSI C" m) 1989
 
 module Hashtbl = struct
-  type ('a, 'b) t = ('a, 'b) hashmap ref
+  type ('a, 'b) t = ('a, 'b) HashMap.t ref
 
-  let create size_hint = ref hashmap_empty
+  let create size_hint = ref HashMap.empty
 
-  let add tbl k v = tbl := hashmap_add k v !tbl
+  let add tbl k v = tbl := HashMap.add k v !tbl
 
-  let mem tbl k = hashmap_mem k !tbl
+  let mem tbl k = HashMap.mem k !tbl
 
-  let find tbl k = hashmap_find k !tbl
+  let find tbl k = HashMap.find k !tbl
 
-  let length tbl = hashmap_cardinal !tbl
+  let length tbl = HashMap.cardinal !tbl
 end
 
 ;;

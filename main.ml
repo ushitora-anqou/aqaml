@@ -931,6 +931,9 @@ let parse tokens =
       | _ -> parse_typexpr_primary tokens
     in
     let rec aux lhs = function
+      | Ident modulename :: Dot :: Ident typectorname :: tokens
+        when is_capital modulename.[0] && is_lower typectorname.[0] ->
+          aux (TyCtorApp (lhs, modulename ^ "." ^ typectorname)) tokens
       | Ident typectorname :: tokens when is_lower typectorname.[0] ->
           aux (TyCtorApp (lhs, typectorname)) tokens
       | tokens -> (tokens, lhs)
