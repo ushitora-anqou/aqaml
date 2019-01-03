@@ -455,6 +455,8 @@ type ast =
   | TryWith of ast * (pattern * ast option * ast) list
   | Nope
   | ModuleDef of string * ast list
+  (* for analysis *)
+  | ModuleDefEnd
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -1534,12 +1536,12 @@ let analyze asts =
     let toplevel_env = ref env in
     let rec aux' exprs = function
       | ModuleDef (this_modulename, body) :: asts ->
-          let modulename_backup = !(toplevel.modulename) in
           toplevel.modulename := this_modulename :: !(toplevel.modulename) ;
-          let env, ast = analyze_module !toplevel_env body in
-          toplevel.modulename := modulename_backup ;
-          toplevel_env := env ;
-          aux' (ast :: exprs) asts
+          (* TODO: is there any better way? *)
+          aux' exprs @@ body @ (ModuleDefEnd :: asts)
+      | ModuleDefEnd :: asts ->
+          toplevel.modulename := List.tl !(toplevel.modulename) ;
+          aux' exprs asts
       | ast :: asts -> (
         try aux' (aux !toplevel_env ast :: exprs) asts
         with LetDef (lets, env) ->
@@ -2437,6 +2439,7 @@ let asts =
   ; ExpDef ("Not_found", None) ]
   @ asts
 in
-let code = generate (analyze asts) in
+let analyzed_data = analyze asts in
+let code = generate analyzed_data in
 print_string
   (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])

@@ -1382,6 +1382,7 @@ test (List.filter (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5; 6; 7]) [2; 4; 6]
 module HashMap = struct
   type ('a, 'b) t = ('a * 'b) list
 
+  (* TODO: this 'rec' is needed due to missing implementation *)
   let rec empty = []
 
   let add k v m = (k, v) :: m
@@ -1453,3 +1454,31 @@ test (HashMap.find "SML" m) 1990 ;
 test (HashMap.find "OCaml" m) 1996 ;
 test (HashMap.find "Caml" m) 1987 ;
 test (HashMap.find "ANSI C" m) 1989
+
+module Hashtbl = struct
+  type ('a, 'b) t = ('a, 'b) hashmap ref
+
+  let create size_hint = ref hashmap_empty
+
+  let add tbl k v = tbl := hashmap_add k v !tbl
+
+  let mem tbl k = hashmap_mem k !tbl
+
+  let find tbl k = hashmap_find k !tbl
+
+  let length tbl = hashmap_cardinal !tbl
+end
+
+;;
+let m = Hashtbl.create 16 in
+Hashtbl.add m "ML" 1977 ;
+Hashtbl.add m "SML" 1984 ;
+Hashtbl.add m "Caml" 1987 ;
+Hashtbl.add m "OCaml" 1996 ;
+test (Hashtbl.find m "SML") 1984 ;
+test (Hashtbl.find m "OCaml") 1996 ;
+test (try Hashtbl.find m "C" with Not_found -> -1) (-1) ;
+test (try Hashtbl.find m "ML" with Not_found -> -1) 1977 ;
+test (Hashtbl.mem m "ML") true ;
+test (Hashtbl.mem m "C") false ;
+test (Hashtbl.length m) 4
