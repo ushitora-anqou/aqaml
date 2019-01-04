@@ -1346,6 +1346,9 @@ module List = struct
   (* TODO: this 'rec' is needed due to missing implementation *)
   let rec hd = function x :: xs -> x | [] -> failwith "hd"
 
+  (* TODO: this 'rec' is needed due to missing implementation *)
+  let rec tl = function x :: xs -> xs | [] -> failwith "tl"
+
   let rec concat = function x :: xs -> x @ concat xs | [] -> []
 
   let flatten lst = concat lst
@@ -1482,3 +1485,15 @@ test (try Hashtbl.find m "ML" with Not_found -> -1) 1977 ;
 test (Hashtbl.mem m "ML") true ;
 test (Hashtbl.mem m "C") false ;
 test (Hashtbl.length m) 4
+
+let filter_after_map f lst =
+  List.map (function Some x -> x | None -> failwith "invalid op")
+  @@ List.filter (function Some x -> true | None -> false)
+  @@ List.map f lst
+
+;;
+test
+  (filter_after_map
+     (function 10 -> Some "ten" | 20 -> Some "twenty" | _ -> None)
+     [5; 3; 10; 20; 10])
+  ["ten"; "twenty"; "ten"]

@@ -137,6 +137,7 @@ type token =
   | Module
   | Struct
   | End
+  | NarutoNaruto
 
 exception Unexpected_token
 
@@ -203,6 +204,7 @@ let string_of_token = function
   | Module -> "module"
   | Struct -> "struct"
   | End -> "end"
+  | NarutoNaruto -> "@@"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -351,10 +353,14 @@ let tokenize program =
       | ']' -> RBracket :: aux i
       | '|' -> Bar :: aux i
       | '^' -> Hat :: aux i
-      | '@' -> Naruto :: aux i
       | '!' -> Exclam :: aux i
       | '{' -> LBrace :: aux i
       | '}' -> RBrace :: aux i
+      | '@' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '@' -> NarutoNaruto :: aux i
+          | _ -> Naruto :: aux (i - 1) )
       | '.' -> (
           let i, ch = next_char i in
           match ch with
@@ -493,7 +499,7 @@ let rec varnames_in_pattern = function
 let parse tokens =
   let is_primary = function
     | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | Ident _ | LRBracket
-      | LParen | LBracket | LRParen | LBrace )
+      | NarutoNaruto | LParen | LBracket | LRParen | LBrace )
       :: _ ->
         true
     | _ -> false
@@ -517,6 +523,7 @@ let parse tokens =
     | Ident id :: tokens ->
         (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
     | LRBracket :: tokens -> (tokens, EmptyList)
+    | NarutoNaruto :: tokens -> parse_expression tokens
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
