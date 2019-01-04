@@ -409,8 +409,9 @@ type typ =
   | TyTuple of typ list
   | TyCustom of string
   | TyVar of string
-  | TyCtorApp of (typ * string)
+  | TyCtorApp of typ * string
   | TyArgs of typ list
+  | TyFunc of typ * typ
 
 type ast =
   | UnitValue
@@ -959,7 +960,14 @@ let parse tokens =
     | [] -> raise Unexpected_token
     | [typexpr] -> (tokens, typexpr)
     | typexprs -> (tokens, TyTuple typexprs)
-  and parse_typexpr tokens = parse_typexpr_tuple tokens
+  and parse_typexpr_func tokens =
+    let tokens, lhs = parse_typexpr_tuple tokens in
+    match tokens with
+    | Arrow :: tokens ->
+        let tokens, rhs = parse_typexpr_func tokens in
+        (tokens, TyFunc (lhs, rhs))
+    | _ -> (tokens, lhs)
+  and parse_typexpr tokens = parse_typexpr_func tokens
   and parse_type_def tokens =
     let parse_type_param = function
       | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)

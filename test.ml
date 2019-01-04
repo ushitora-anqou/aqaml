@@ -1304,9 +1304,17 @@ test (TestModule1.hoge 10) 12 ;
 test TestModule1.Katsuo TestModule1.Katsuo ;
 test (TestModule1.f ()) 12
 
+(* for self-hosting *)
+
 exception Failure of string
 
 let failwith str = raise (Failure str)
+
+let int_of_char ch = Char.code ch
+
+;;
+test (int_of_char 'A') 65 ;
+test (int_of_char 'a') 97
 
 module List = struct
   let rec length = function _ :: xs -> 1 + length xs | _ -> 0
@@ -1497,3 +1505,65 @@ test
      (function 10 -> Some "ten" | 20 -> Some "twenty" | _ -> None)
      [5; 3; 10; 20; 10])
   ["ten"; "twenty"; "ten"]
+
+let rec list_unique lst =
+  let set = Hashtbl.create @@ List.length lst in
+  let rec aux res = function
+    | [] -> res
+    | x :: xs ->
+        if Hashtbl.mem set x then aux res xs
+        else (
+          Hashtbl.add set x () ;
+          aux (x :: res) xs )
+  in
+  aux [] lst
+
+;;
+test (list_unique [52; 36; 2; 0; 10; 36; 0; 52; 10; 72]) [72; 10; 0; 2; 36; 52]
+
+let is_lower = function 'a' .. 'z' -> true | _ -> false
+
+;;
+test (is_lower 'd') true ;
+test (is_lower 'e') true ;
+test (is_lower 'Q') false ;
+test (is_lower '\n') false
+
+let append_to_list_ref x xs = xs := x :: !xs
+
+;;
+let lst = ref [] in
+append_to_list_ref 10 lst ;
+append_to_list_ref 3 lst ;
+test !lst [3; 10]
+
+let hashmap_of_list src =
+  let hashmap = ref HashMap.empty in
+  List.iter (fun (k, v) -> hashmap := HashMap.add k v !hashmap) src ;
+  !hashmap
+
+;;
+let m = hashmap_of_list [("key1", "value1"); ("key2", "value2")] in
+test (HashMap.find "key1" m) "value1" ;
+test (HashMap.find "key2" m) "value2"
+
+let integrate od nw = HashMap.union (fun _ _ r -> Some r) od nw
+
+;;
+let m1 = hashmap_of_list [("key1", "value1"); ("key2", "value2")] in
+let m2 = hashmap_of_list [("key1", "value1"); ("key2", "value3")] in
+let m = integrate m1 m2 in
+test (HashMap.find "key1" m) "value1" ;
+test (HashMap.find "key2" m) "value3"
+
+let digit x =
+  match x with
+  | '0' .. '9' -> int_of_char x - int_of_char '0'
+  | _ -> failwith "unexpected char: not digit"
+
+;;
+test (digit '5') 5 ;
+test (digit '7') 7 ;
+test (try digit '\n' with Failure _ -> -1) (-1)
+
+type test_for_func_type = Value of int | Func of (int -> int)
