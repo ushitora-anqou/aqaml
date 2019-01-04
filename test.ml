@@ -1164,8 +1164,6 @@ let rec eval = function
 ;;
 test (eval (parse (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))) 10
 
-let ignore _ = ()
-
 type ('a, 'b) hashmap = ('a * 'b) list
 
 let hashmap_empty = []
@@ -1306,68 +1304,9 @@ test (TestModule1.f ()) 12
 
 (* for self-hosting *)
 
-exception Failure of string
-
-let failwith str = raise (Failure str)
-
-let int_of_char ch = Char.code ch
-
 ;;
 test (int_of_char 'A') 65 ;
 test (int_of_char 'a') 97
-
-module List = struct
-  let rec length = function _ :: xs -> 1 + length xs | _ -> 0
-
-  let rec fold_left f a bs =
-    match bs with b :: bs -> fold_left f (f a b) bs | _ -> a
-
-  let rev lst =
-    let rec aux acc = function x :: xs -> aux (x :: acc) xs | [] -> acc in
-    aux [] lst
-
-  let rec iter f = function x :: xs -> f x ; iter f xs | [] -> ()
-
-  let rec iteri f =
-    let rec aux i = function
-      | x :: xs ->
-          f i x ;
-          aux (i + 1) xs
-      | [] -> ()
-    in
-    aux 0
-
-  let map f lst =
-    let rec aux acc = function x :: xs -> aux (f x :: acc) xs | [] -> acc in
-    List.rev (aux [] lst)
-
-  let mapi f lst =
-    let rec aux i acc = function
-      | x :: xs -> aux (i + 1) (f i x :: acc) xs
-      | [] -> acc
-    in
-    List.rev (aux 0 [] lst)
-
-  let rec rev_append l1 l2 =
-    match l1 with x :: xs -> rev_append xs (x :: l2) | [] -> l2
-
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec hd = function x :: xs -> x | [] -> failwith "hd"
-
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec tl = function x :: xs -> xs | [] -> failwith "tl"
-
-  let rec concat = function x :: xs -> x @ concat xs | [] -> []
-
-  let flatten lst = concat lst
-
-  let filter f lst =
-    let rec aux acc = function
-      | x :: xs -> aux (if f x then x :: acc else acc) xs
-      | [] -> acc
-    in
-    List.rev (aux [] lst)
-end
 
 ;;
 test (List.length [1; 2; 3]) 3 ;

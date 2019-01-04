@@ -138,6 +138,7 @@ type token =
   | Struct
   | End
   | NarutoNaruto
+  | External
 
 exception Unexpected_token
 
@@ -205,6 +206,7 @@ let string_of_token = function
   | Struct -> "struct"
   | End -> "end"
   | NarutoNaruto -> "@@"
+  | External -> "external"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -341,6 +343,7 @@ let tokenize program =
           | "module" -> Module
           | "struct" -> Struct
           | "end" -> End
+          | "external" -> External
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -464,6 +467,7 @@ type ast =
   | ModuleDef of string * ast list
   (* for analysis *)
   | ModuleDefEnd
+  | ExternalDecl of string * typ * string
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -1064,6 +1068,13 @@ let parse tokens =
       | Exception :: tokens ->
           let tokens, expr = parse_exp_def tokens in
           aux (expr :: exprs) tokens
+      | External :: Ident id :: Colon :: tokens -> (
+          let tokens, typexpr = parse_typexpr tokens in
+          match tokens with
+          | Equal :: StringLiteral (_, str) :: tokens ->
+              let ast = ExternalDecl (id, typexpr, str) in
+              aux (ast :: exprs) tokens
+          | _ -> raise Unexpected_token )
       | Module :: Ident modulename :: Equal :: Struct :: tokens ->
           let tokens, asts = aux [] tokens in
           let ast = ModuleDef (modulename, asts) in
@@ -1560,6 +1571,20 @@ let analyze asts =
       | ModuleDefEnd :: asts ->
           toplevel.modulename := List.tl !(toplevel.modulename) ;
           aux' exprs asts
+      | ExternalDecl (id, typexpr, decl) :: asts ->
+          let id = name_with_modulename id in
+          let nargs =
+            let rec aux cnt = function
+              | TyFunc (lhs, rhs) -> aux (cnt + 1) rhs
+              | _ -> cnt
+            in
+            aux 0 typexpr
+          in
+          toplevel_env :=
+            { !toplevel_env with
+              symbols=
+                HashMap.add id (FuncVar (decl, nargs)) !toplevel_env.symbols } ;
+          aux' exprs asts
       | ast :: asts -> (
         try aux' (aux !toplevel_env ast :: exprs) asts
         with LetDef (lets, env) ->
@@ -1571,19 +1596,7 @@ let analyze asts =
     let ast = aux' [] exprs in
     (!toplevel_env, ast)
   in
-  let env =
-    { symbols=
-        hashmap_of_list
-        @@ [ ("String.length", FuncVar ("aqaml_string_length", 1))
-           ; ("String.get", FuncVar ("aqaml_string_get", 2))
-           ; ("Char.code", FuncVar ("aqaml_char_code", 1))
-           ; ("print_string", FuncVar ("aqaml_print_string", 1))
-           ; ("exit", FuncVar ("aqaml_exit", 1))
-           ; ("ref", FuncVar ("aqaml_ref", 1))
-           ; ("raise", FuncVar ("aqaml_raise", 1)) ]
-    ; parent= None
-    ; freevars= ref [] }
-  in
+  let env = {symbols= HashMap.empty; parent= None; freevars= ref []} in
   let _, ast = analyze_module env asts in
   let ast = LetFunc (false, "aqaml_main", [UnitValue], ast, []) in
   append_to_list_ref ast toplevel.letfuncs ;
@@ -2452,11 +2465,6 @@ let program = read_lines () in
 let tokens = tokenize program in
 (* eprint_token_list tokens ; *)
 let asts = parse tokens in
-let asts =
-  [ ExpDef ("Match_failure", Some (TyTuple [TyString; TyInt; TyInt]))
-  ; ExpDef ("Not_found", None) ]
-  @ asts
-in
 let analyzed_data = analyze asts in
 let code = generate analyzed_data in
 print_string
