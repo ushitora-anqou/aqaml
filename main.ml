@@ -82,7 +82,10 @@ type token =
   | Minus
   | Star
   | Slash
-  | Ident of string
+  | CapitalIdent of string
+  | LowerIdent of string
+  | CapitalIdentWithModule of string
+  | LowerIdentWithModule of string
   | LParen
   | RParen
   | LRParen
@@ -152,7 +155,11 @@ let string_of_token = function
   | Minus -> "-"
   | Star -> "*"
   | Slash -> "/"
-  | Ident str -> str
+  | CapitalIdent str
+   |LowerIdent str
+   |CapitalIdentWithModule str
+   |LowerIdentWithModule str ->
+      str
   | LParen -> "("
   | RParen -> ")"
   | LRParen -> "()"
@@ -315,42 +322,59 @@ let tokenize program =
       | '"' ->
           let i, str = next_string_literal i in
           StringLiteral (make_id "string", str) :: aux i
-      | 'a' .. 'z' | 'A' .. 'Z' | '_' ->
+      | 'a' .. 'z' | 'A' .. 'Z' | '_' -> (
           let i, str = next_ident (i - 1) in
-          ( match str with
-          | "let" -> Let
-          | "in" -> In
-          | "rec" -> Rec
-          | "true" -> IntLiteral 1 (* TODO: boolean type *)
-          | "false" -> IntLiteral 0
-          | "if" -> If
-          | "then" -> Then
-          | "else" -> Else
-          | "match" -> Match
-          | "with" -> With
-          | "fun" -> Fun
-          | "function" -> Function
-          | "as" -> As
-          | "when" -> When
-          | "type" -> Type
-          | "of" -> Of
-          | "int" -> KwInt
-          | "char" -> KwChar
-          | "string" -> KwString
-          | "and" -> And
-          | "try" -> Try
-          | "exception" -> Exception
-          | "mod" -> Mod
-          | "lsl" -> Lsl
-          | "lsr" -> Lsr
-          | "asr" -> Asr
-          | "module" -> Module
-          | "struct" -> Struct
-          | "end" -> End
-          | "external" -> External
-          | "mutable" -> Mutable
-          | _ -> Ident str )
-          :: aux i
+          match str with
+          | "let" -> Let :: aux i
+          | "in" -> In :: aux i
+          | "rec" -> Rec :: aux i
+          | "true" -> IntLiteral 1 :: aux i (* TODO: boolean type *)
+          | "false" -> IntLiteral 0 :: aux i
+          | "if" -> If :: aux i
+          | "then" -> Then :: aux i
+          | "else" -> Else :: aux i
+          | "match" -> Match :: aux i
+          | "with" -> With :: aux i
+          | "fun" -> Fun :: aux i
+          | "function" -> Function :: aux i
+          | "as" -> As :: aux i
+          | "when" -> When :: aux i
+          | "type" -> Type :: aux i
+          | "of" -> Of :: aux i
+          | "int" -> KwInt :: aux i
+          | "char" -> KwChar :: aux i
+          | "string" -> KwString :: aux i
+          | "and" -> And :: aux i
+          | "try" -> Try :: aux i
+          | "exception" -> Exception :: aux i
+          | "mod" -> Mod :: aux i
+          | "lsl" -> Lsl :: aux i
+          | "lsr" -> Lsr :: aux i
+          | "asr" -> Asr :: aux i
+          | "module" -> Module :: aux i
+          | "struct" -> Struct :: aux i
+          | "end" -> End :: aux i
+          | "external" -> External :: aux i
+          | "mutable" -> Mutable :: aux i
+          | _ when is_capital str.[0] ->
+              let rec aux' i cap acc =
+                let i, ch = next_char i in
+                match ch with
+                | '.' ->
+                    let i, str = next_ident i in
+                    aux' i (is_capital str.[0]) (str :: acc)
+                | _ -> (
+                    let str = String.concat "." @@ List.rev acc in
+                    ( i - 1
+                    , match (cap, List.length acc > 1) with
+                      | false, false -> LowerIdent str
+                      | false, true -> LowerIdentWithModule str
+                      | true, false -> CapitalIdent str
+                      | true, true -> CapitalIdentWithModule str ) )
+              in
+              let i, tk = aux' i true [str] in
+              tk :: aux i
+          | _ -> LowerIdent str :: aux i )
       | '+' -> Plus :: aux i
       | '*' -> Star :: aux i
       | '/' -> Slash :: aux i
@@ -514,8 +538,9 @@ let rec varnames_in_pattern = function
 
 let parse tokens =
   let is_primary = function
-    | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | Ident _ | LRBracket
-      | NarutoNaruto | LParen | LBracket | LRParen | LBrace )
+    | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | LowerIdent _
+      | LowerIdentWithModule _ | CapitalIdent _ | CapitalIdentWithModule _
+      | LRBracket | NarutoNaruto | LParen | LBracket | LRParen | LBrace )
       :: _ ->
         true
     | _ -> false
@@ -530,14 +555,10 @@ let parse tokens =
     | CharLiteral ch :: tokens -> (tokens, CharValue ch)
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
-    | Ident modname :: Dot :: Ident varname :: tokens
-      when is_capital modname.[0] && is_lower varname.[0] ->
-        (tokens, Var (modname ^ "." ^ varname))
-    | Ident modname :: Dot :: Ident varname :: tokens
-      when is_capital modname.[0] && is_capital varname.[0] ->
-        (tokens, CtorApp (None, modname ^ "." ^ varname, None))
-    | Ident id :: tokens ->
-        (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
+    | (LowerIdentWithModule varname | LowerIdent varname) :: tokens ->
+        (tokens, Var varname)
+    | (CapitalIdentWithModule ctorname | CapitalIdent ctorname) :: tokens ->
+        (tokens, CtorApp (None, ctorname, None))
     | LRBracket :: tokens -> (tokens, EmptyList)
     | NarutoNaruto :: tokens -> parse_expression tokens
     | LParen :: tokens -> (
@@ -557,10 +578,13 @@ let parse tokens =
         let tokens, car = parse_let tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
-    (* TODO: Records in a module *)
-    | LBrace :: Ident fieldname :: Equal :: tokens ->
+    | LBrace
+      :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
+         :: Equal :: tokens ->
         let rec aux fields = function
-          | Semicolon :: Ident fieldname :: Equal :: tokens ->
+          | Semicolon
+            :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
+               :: Equal :: tokens ->
               let tokens, ast = parse_let tokens in
               aux ((fieldname, ast) :: fields) tokens
           | RBrace :: tokens -> (tokens, fields)
@@ -572,9 +596,13 @@ let parse tokens =
     | LBrace :: tokens -> (
         let tokens, base = parse_primary tokens in
         match tokens with
-        | With :: Ident fieldname :: Equal :: tokens ->
+        | With
+          :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
+             :: Equal :: tokens ->
             let rec aux fields = function
-              | Semicolon :: Ident fieldname :: Equal :: tokens ->
+              | Semicolon
+                :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
+                   :: Equal :: tokens ->
                   let tokens, ast = parse_let tokens in
                   aux ((fieldname, ast) :: fields) tokens
               | RBrace :: tokens -> (tokens, fields)
@@ -588,7 +616,7 @@ let parse tokens =
   and parse_dot tokens =
     let tokens, lhs = parse_primary tokens in
     match tokens with
-    | Dot :: Ident fieldname :: tokens ->
+    | Dot :: LowerIdent fieldname :: tokens ->
         (tokens, RecordDotAccess (None, lhs, fieldname))
     | DotLBracket :: tokens -> (
         let tokens, rhs = parse_expression tokens in
@@ -862,8 +890,9 @@ let parse tokens =
     | CharLiteral ch :: tokens -> (tokens, CharValue ch)
     | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
     | LRParen :: tokens -> (tokens, UnitValue)
-    | Ident id :: tokens ->
-        (tokens, if is_capital id.[0] then CtorApp (None, id, None) else Var id)
+    | (LowerIdent id | LowerIdentWithModule id) :: tokens -> (tokens, Var id)
+    | (CapitalIdent id | CapitalIdentWithModule id) :: tokens ->
+        (tokens, CtorApp (None, id, None))
     | LRBracket :: tokens -> (tokens, EmptyList)
     | LParen :: tokens -> (
         let tokens, ast = parse_pattern tokens in
@@ -927,15 +956,16 @@ let parse tokens =
   and parse_pattern_as tokens =
     let tokens, ptn = parse_pattern_or tokens in
     match tokens with
-    | As :: Ident name :: tokens -> (tokens, PtnAlias (ptn, Var name))
+    | As :: LowerIdent name :: tokens -> (tokens, PtnAlias (ptn, Var name))
     | _ -> (tokens, ptn)
   and parse_pattern tokens = parse_pattern_as tokens
   and parse_typexpr_primary = function
     | KwInt :: tokens -> (tokens, TyInt)
     | KwChar :: tokens -> (tokens, TyChar)
     | KwString :: tokens -> (tokens, TyString)
-    | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)
-    | Ident typename :: tokens -> (tokens, TyCustom typename)
+    | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
+    | (LowerIdent typename | LowerIdentWithModule typename) :: tokens ->
+        (tokens, TyCustom typename)
     | LParen :: _ ->
         failwith "Any token LParen should be handled in parse_typexpr_ctor_app"
     | _ -> raise Unexpected_token
@@ -958,10 +988,8 @@ let parse tokens =
       | _ -> parse_typexpr_primary tokens
     in
     let rec aux lhs = function
-      | Ident modulename :: Dot :: Ident typectorname :: tokens
-        when is_capital modulename.[0] && is_lower typectorname.[0] ->
-          aux (TyCtorApp (lhs, modulename ^ "." ^ typectorname)) tokens
-      | Ident typectorname :: tokens when is_lower typectorname.[0] ->
+      | (LowerIdent typectorname | LowerIdentWithModule typectorname) :: tokens
+        ->
           aux (TyCtorApp (lhs, typectorname)) tokens
       | tokens -> (tokens, lhs)
     in
@@ -989,7 +1017,7 @@ let parse tokens =
   and parse_typexpr tokens = parse_typexpr_func tokens
   and parse_type_def tokens =
     let parse_type_param = function
-      | Apostrophe :: Ident id :: tokens -> (tokens, TyVar id)
+      | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
       | _ -> raise Unexpected_token
     in
     let parse_type_params = function
@@ -1013,18 +1041,18 @@ let parse tokens =
         | Some (tokens, type_params) -> (tokens, Some type_params)
       in
       match tokens with
-      | Ident typename :: Equal :: tokens -> (
+      | LowerIdent typename :: Equal :: tokens -> (
           let parse_variant tokens =
             let rec aux first ctors = function
-              | Bar :: Ident ctorname :: Of :: tokens ->
+              | Bar :: CapitalIdent ctorname :: Of :: tokens ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
-              | Ident ctorname :: Of :: tokens when first ->
+              | CapitalIdent ctorname :: Of :: tokens when first ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
-              | Bar :: Ident ctorname :: tokens ->
+              | Bar :: CapitalIdent ctorname :: tokens ->
                   aux false ((ctorname, None) :: ctors) tokens
-              | Ident ctorname :: tokens when first ->
+              | CapitalIdent ctorname :: tokens when first ->
                   aux false ((ctorname, None) :: ctors) tokens
               | tokens -> (tokens, ctors)
             in
@@ -1032,14 +1060,15 @@ let parse tokens =
             (tokens, DefVariant (type_param, typename, ctors))
           in
           match tokens with
-          | Ident str :: _ when is_capital str.[0] -> parse_variant tokens
+          | CapitalIdent str :: _ -> parse_variant tokens
           | Bar :: _ -> parse_variant tokens
           (* TODO: skip mutable *)
-          | LBrace :: Ident fieldname :: Colon :: tokens
-           |LBrace :: Mutable :: Ident fieldname :: Colon :: tokens ->
+          | LBrace :: LowerIdent fieldname :: Colon :: tokens
+           |LBrace :: Mutable :: LowerIdent fieldname :: Colon :: tokens ->
               let rec aux fields = function
-                | Semicolon :: Ident fieldname :: Colon :: tokens
-                 |Semicolon :: Mutable :: Ident fieldname :: Colon :: tokens ->
+                | Semicolon :: LowerIdent fieldname :: Colon :: tokens
+                 |Semicolon
+                  :: Mutable :: LowerIdent fieldname :: Colon :: tokens ->
                     let tokens, typexpr = parse_typexpr tokens in
                     aux ((fieldname, typexpr) :: fields) tokens
                 | RBrace :: tokens -> (tokens, fields)
@@ -1064,10 +1093,10 @@ let parse tokens =
     aux [entry] tokens
   and parse_exp_def = function
     (* token Exception is already fetched *)
-    | Ident expname :: Of :: tokens ->
+    | CapitalIdent expname :: Of :: tokens ->
         let tokens, typ = parse_typexpr tokens in
         (tokens, ExpDef (expname, Some typ))
-    | Ident expname :: tokens -> (tokens, ExpDef (expname, None))
+    | CapitalIdent expname :: tokens -> (tokens, ExpDef (expname, None))
     | _ -> raise Unexpected_token
   in
   let parse_expressions_and_definitions tokens =
@@ -1086,14 +1115,14 @@ let parse tokens =
       | Exception :: tokens ->
           let tokens, expr = parse_exp_def tokens in
           aux (expr :: exprs) tokens
-      | External :: Ident id :: Colon :: tokens -> (
+      | External :: LowerIdent id :: Colon :: tokens -> (
           let tokens, typexpr = parse_typexpr tokens in
           match tokens with
           | Equal :: StringLiteral (_, str) :: tokens ->
               let ast = ExternalDecl (id, typexpr, str) in
               aux (ast :: exprs) tokens
           | _ -> raise Unexpected_token )
-      | Module :: Ident modulename :: Equal :: Struct :: tokens ->
+      | Module :: CapitalIdent modulename :: Equal :: Struct :: tokens ->
           let tokens, asts = aux [] tokens in
           let ast = ModuleDef (modulename, asts) in
           aux (ast :: exprs) tokens
