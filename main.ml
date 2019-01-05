@@ -1181,7 +1181,7 @@ let analyze asts =
     ; records_fields= Hashtbl.create 16
     ; modulename= ref [] }
   in
-  let name_with_modulename name =
+  let with_modulename name =
     String.concat "." @@ List.rev @@ (name :: !(toplevel.modulename))
   in
   let exprs2expr = function
@@ -1189,9 +1189,13 @@ let analyze asts =
     | [expr] -> expr
     | exprs -> ExprSeq exprs
   in
+  let hashtbl_find_with_modulename hashtbl name =
+    try (false, Hashtbl.find hashtbl name) with Not_found ->
+      (true, Hashtbl.find hashtbl (with_modulename name))
+  in
   let hashmap_find_with_modulename name hashmap =
     try HashMap.find name hashmap with Not_found ->
-      HashMap.find (name_with_modulename name) hashmap
+      HashMap.find (with_modulename name) hashmap
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -1250,10 +1254,16 @@ let analyze asts =
     | TupleValue values -> TupleValue (List.map (aux env) values)
     | RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
-        let typename = Hashtbl.find toplevel.records key_fieldname in
+        let withmod, typename =
+          hashtbl_find_with_modulename toplevel.records key_fieldname
+        in
         RecordValue
           ( Some typename
-          , List.map (fun (name, ast) -> (name, aux env ast)) fields )
+          , List.map
+              (fun (name, ast) ->
+                ((if withmod then with_modulename name else name), aux env ast)
+                )
+              fields )
     | RecordValueWith (base, fields) ->
         let key_fieldname, _ = List.hd fields in
         let typename = Hashtbl.find toplevel.records key_fieldname in
@@ -1344,14 +1354,14 @@ let analyze asts =
           @@ List.map
                (function
                  | DefTypeAlias (type_param, typename, typ) ->
-                     let typename = name_with_modulename typename in
+                     let typename = with_modulename typename in
                      DefTypeAlias (type_param, typename, typ)
                  | DefVariant (type_param, typename, ctornames) ->
-                     let typename = name_with_modulename typename in
+                     let typename = with_modulename typename in
                      let ctornames =
                        List.map
                          (fun (ctorname, typexpr) ->
-                           (name_with_modulename ctorname, typexpr) )
+                           (with_modulename ctorname, typexpr) )
                          ctornames
                      in
                      List.iter
@@ -1360,11 +1370,11 @@ let analyze asts =
                        ctornames ;
                      DefVariant (type_param, typename, ctornames)
                  | DefRecord (typename, fields) ->
-                     let typename = name_with_modulename typename in
+                     let typename = with_modulename typename in
                      let fields =
                        List.map
                          (fun (fieldname, typexpr) ->
-                           (name_with_modulename fieldname, typexpr) )
+                           (with_modulename fieldname, typexpr) )
                          fields
                      in
                      List.iter
@@ -1438,7 +1448,7 @@ let analyze asts =
                   let funcname =
                     match rhs_of_in with
                     | Some _ -> funcname
-                    | None -> name_with_modulename funcname
+                    | None -> with_modulename funcname
                   in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (true, funcname, [], rhs_of_eq, [])
@@ -1447,7 +1457,7 @@ let analyze asts =
                   let funcname =
                     match rhs_of_in with
                     | Some _ -> funcname
-                    | None -> name_with_modulename funcname
+                    | None -> with_modulename funcname
                   in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (recursive, funcname, args, rhs_of_eq, [])
@@ -1628,7 +1638,7 @@ let analyze asts =
           toplevel.modulename := List.tl !(toplevel.modulename) ;
           aux' exprs asts
       | ExternalDecl (id, typexpr, decl) :: asts ->
-          let id = name_with_modulename id in
+          let id = with_modulename id in
           let nargs =
             let rec aux cnt = function
               | TyFunc (lhs, rhs) -> aux (cnt + 1) rhs

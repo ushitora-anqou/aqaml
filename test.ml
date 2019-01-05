@@ -1536,3 +1536,9 @@ r.testrecord2_str <- "def" ;
 test r.testrecord2_str "def" ;
 r.testrecord2_int <- 35 ;
 test r.testrecord2_int 35
+
+module Buffer = struct
+  type t = {mutable buf: Bytes.t; mutable len: int}
+
+  let create size = {buf= Bytes.create size; len= 0}
+end
