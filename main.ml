@@ -139,6 +139,7 @@ type token =
   | End
   | NarutoNaruto
   | External
+  | LArrow
 
 exception Unexpected_token
 
@@ -207,6 +208,7 @@ let string_of_token = function
   | End -> "end"
   | NarutoNaruto -> "@@"
   | External -> "external"
+  | LArrow -> "<-"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -375,7 +377,10 @@ let tokenize program =
           match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
       | '<' -> (
           let i, ch = next_char i in
-          match ch with '>' -> LTGT :: aux i | _ -> LT :: aux (i - 1) )
+          match ch with
+          | '>' -> LTGT :: aux i
+          | '-' -> LArrow :: aux i
+          | _ -> LT :: aux (i - 1) )
       | '[' -> (
           let i, ch = next_char i in
           match ch with
@@ -463,6 +468,8 @@ type ast =
   | Deref of ast
   | ExpDef of string * typ option
   | TryWith of ast * (pattern * ast option * ast) list
+  | StringGet of ast * ast
+  | StringSet of ast * ast * ast
   | Nope
   | ModuleDef of string * ast list
   (* for analysis *)
@@ -582,10 +589,7 @@ let parse tokens =
     | DotLBracket :: tokens -> (
         let tokens, rhs = parse_expression tokens in
         match tokens with
-        | RBracket :: tokens ->
-            (* a.[b] returns a b-th character of a string a.
-             * Therefore, convert it to String.get call *)
-            (tokens, AppCls (Var "String.get", [lhs; rhs]))
+        | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
         | _ -> raise Unexpected_token )
     | _ -> (tokens, lhs)
   and parse_prefix = function
@@ -722,6 +726,11 @@ let parse tokens =
     | ColonEqual :: tokens ->
         let tokens, rhs = parse_let tokens in
         (tokens, RefAssign (lhs, rhs))
+    | LArrow :: tokens -> (
+        let tokens, rhs = parse_let tokens in
+        match lhs with
+        | StringGet (str, idx) -> (tokens, StringSet (str, idx, rhs))
+        | _ -> raise Unexpected_token )
     | _ -> (tokens, lhs)
   and parse_if = function
     | If :: tokens -> (
@@ -1258,6 +1267,12 @@ let analyze asts =
         let funcname = ".lambda" in
         aux env
         @@ LetAnd (false, [(Var funcname :: args, body)], Some (Var funcname))
+    | StringGet (str, idx) ->
+        (* a.[b] returns a b-th character of a string a.
+         * Therefore, convert it to String.get call *)
+        aux env @@ AppCls (Var "String.get", [str; idx])
+    | StringSet (str, idx, ast) ->
+        aux env @@ AppCls (Var "String.set", [str; idx; ast])
     | TryWith (cond, cases) ->
         TryWith (aux env cond, analyze_pattern_match_cases env cases)
     | MatchWith (cond, cases) ->
@@ -2375,6 +2390,16 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "mov rsi, rbx" ;
     appstr buf "call aqaml_string_get_detail@PLT" ;
     appstr buf @@ tag_int "rax" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_string_set:" ;
+    appstr buf @@ untag_int "rbx" ;
+    appstr buf @@ untag_int "rdi" ;
+    appstr buf "mov rdx, rdi" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_string_set_detail@PLT" ;
+    appfmt buf "mov rax, %d" @@ tagged_int 0 ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_char_code:" ;

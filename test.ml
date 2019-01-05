@@ -1506,3 +1506,7 @@ test (digit '7') 7 ;
 test (try digit '\n' with Failure _ -> -1) (-1)
 
 type test_for_func_type = Value of int | Func of (int -> int)
+
+;;
+let str = "debug" in
+test str "debug" ; str.[2] <- 'a' ; test str "deaug"

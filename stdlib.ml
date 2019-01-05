@@ -14,6 +14,8 @@ module String = struct
   external length : string -> int = "aqaml_string_length"
 
   external get : string -> int -> char = "aqaml_string_get"
+
+  external set : string -> int -> char -> unit = "aqaml_string_set"
 end
 
 exception Failure of string
