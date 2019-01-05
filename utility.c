@@ -29,6 +29,7 @@ typedef struct AQamlValue {
 } AQamlValue;
 
 uint64_t aqaml_string_length_detail(uint64_t ptr);
+uint64_t aqaml_string_create_detail(uint64_t len);
 
 void *aqaml_malloc_detail(uint32_t size)
 {
@@ -103,17 +104,13 @@ uint64_t aqaml_concat_string_detail(uint64_t lhs_src, uint64_t rhs_src)
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);
     // assert(lhs.kind == AQAML_STRING && rhs.kind == AQAML_STRING);
 
-    uint64_t ret_src = aqaml_alloc_block((lhs_len + rhs_len) / 8 + 1, 0, 252);
+    uint64_t ret_src = aqaml_string_create_detail(lhs_len + rhs_len);
     AQamlValue ret = get_value(ret_src);
-    uint64_t space = 7 - (lhs_len + rhs_len) % 8;
 
     for (uint64_t i = 0; i < lhs_len; i++)
         ret.string->str[i] = lhs.string->str[i];
     for (uint64_t i = 0; i < rhs_len; i++)
         ret.string->str[i + lhs_len] = rhs.string->str[i];
-    for (uint64_t i = 0; i < space; i++)
-        ret.string->str[i + lhs_len + rhs_len] = 0u;
-    ret.string->str[lhs_len + rhs_len + space] = space;
 
     return ret_src;
 }
@@ -143,6 +140,16 @@ void aqaml_string_set_detail(uint64_t str_src, uint64_t index, uint64_t chr)
     uint64_t length = aqaml_string_length_detail(str_src);
     assert(index < length);  // TODO: raise Invalid_argument
     val.string->str[index] = (uint8_t)chr;
+}
+
+uint64_t aqaml_string_create_detail(uint64_t len)
+{
+    uint64_t ret_src = aqaml_alloc_block(len / 8 + 1, 0, 252);
+    uint64_t space = 7 - len % 8;
+    AQamlValue ret = get_value(ret_src);
+    for (uint64_t i = 0; i < space; i++) ret.string->str[len + i] = 0;
+    ret.string->str[len + space] = space;
+    return ret_src;
 }
 
 void aqaml_string_blit_detail(uint64_t src_src, uint64_t srcoff,

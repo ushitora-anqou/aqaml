@@ -19,6 +19,8 @@ module Bytes = struct
 
   external set : bytes -> int -> char -> unit = "aqaml_string_set"
 
+  external create : int -> bytes = "aqaml_string_create"
+
   external blit :
     bytes -> int -> bytes -> int -> int -> unit
     = "aqaml_string_blit"
@@ -38,6 +40,8 @@ module String = struct
   external get : string -> int -> char = "aqaml_string_get"
 
   external set : string -> int -> char -> unit = "aqaml_string_set"
+
+  external create : int -> bytes = "aqaml_string_create"
 
   external blit :
     string -> int -> bytes -> int -> int -> unit

@@ -1517,3 +1517,11 @@ let dst = Bytes.of_string "def  " in
 String.blit src 1 dst 2 3 ;
 test src "abcd" ;
 test dst @@ Bytes.of_string "debcd"
+
+;;
+let src = "abcd" in
+let dst = Bytes.create 5 in
+dst.[0] <- 'd' ;
+dst.[1] <- 'e' ;
+String.blit src 1 dst 2 3 ;
+test dst @@ Bytes.of_string "debcd"
