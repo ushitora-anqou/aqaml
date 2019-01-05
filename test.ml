@@ -1508,8 +1508,10 @@ test (try digit '\n' with Failure _ -> -1) (-1)
 type test_for_func_type = Value of int | Func of (int -> int)
 
 ;;
-let str = "debug" in
-test str "debug" ; str.[2] <- 'a' ; test str "deaug"
+let str = Bytes.of_string "debug" in
+test str @@ Bytes.of_string "debug" ;
+str.[2] <- 'a' ;
+test str @@ Bytes.of_string "deaug"
 
 ;;
 let src = "abcd" in
@@ -1537,8 +1539,21 @@ test r.testrecord2_str "def" ;
 r.testrecord2_int <- 35 ;
 test r.testrecord2_int 35
 
-module Buffer = struct
-  type t = {mutable buf: Bytes.t; mutable len: int}
+;;
+let str = "abcdefghi" in
+test (String.sub str 2 3) "cde"
 
-  let create size = {buf= Bytes.create size; len= 0}
-end
+;;
+let buf = Buffer.create 3 in
+test (Buffer.contents buf) "" ;
+Buffer.add_char buf 'a' ;
+test (Buffer.contents buf) "a" ;
+Buffer.add_char buf 'b' ;
+Buffer.add_char buf 'c' ;
+Buffer.add_char buf 'd' ;
+test (Buffer.contents buf) "abcd" ;
+Buffer.add_string buf "efghi" ;
+test (Buffer.contents buf) "abcdefghi" ;
+Buffer.add_string buf "jk" ;
+Buffer.add_string buf "lm" ;
+test (Buffer.contents buf) "abcdefghijklm"

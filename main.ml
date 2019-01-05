@@ -560,7 +560,7 @@ let parse tokens =
     | (CapitalIdentWithModule ctorname | CapitalIdent ctorname) :: tokens ->
         (tokens, CtorApp (None, ctorname, None))
     | LRBracket :: tokens -> (tokens, EmptyList)
-    | NarutoNaruto :: tokens -> parse_expression tokens
+    | NarutoNaruto :: tokens -> parse_let tokens
     | LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
@@ -1285,8 +1285,13 @@ let analyze asts =
                             , RecordDotAccess (None, new_base, fieldname) ) )
                         fieldnames )) )
     | RecordDotAccess (None, ast, fieldname) ->
-        let typename = Hashtbl.find toplevel.records fieldname in
-        RecordDotAccess (Some typename, aux env ast, fieldname)
+        let withmod, typename =
+          hashtbl_find_with_modulename toplevel.records fieldname
+        in
+        RecordDotAccess
+          ( Some typename
+          , aux env ast
+          , if withmod then with_modulename fieldname else fieldname )
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -1300,8 +1305,14 @@ let analyze asts =
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
     | RecordAssign (None, lhs, fieldname, rhs) ->
-        let typename = Hashtbl.find toplevel.records fieldname in
-        RecordAssign (Some typename, aux env lhs, fieldname, aux env rhs)
+        let withmod, typename =
+          hashtbl_find_with_modulename toplevel.records fieldname
+        in
+        RecordAssign
+          ( Some typename
+          , aux env lhs
+          , (if withmod then with_modulename fieldname else fieldname)
+          , aux env rhs )
     | Deref ast -> Deref (aux env ast)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
@@ -2481,6 +2492,15 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "mov rdi, rax" ;
     appstr buf "call aqaml_string_blit_detail@PLT" ;
     appfmt buf "mov rax, %d" @@ tagged_int 0 ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_string_sub:" ;
+    appstr buf @@ untag_int "rbx" ;
+    appstr buf @@ untag_int "rdi" ;
+    appstr buf "mov rdx, rdi" ;
+    appstr buf "mov rsi, rbx" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_string_sub_detail@PLT" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_char_code:" ;
