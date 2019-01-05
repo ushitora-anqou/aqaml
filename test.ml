@@ -1510,3 +1510,10 @@ type test_for_func_type = Value of int | Func of (int -> int)
 ;;
 let str = "debug" in
 test str "debug" ; str.[2] <- 'a' ; test str "deaug"
+
+;;
+let src = "abcd" in
+let dst = Bytes.of_string "def  " in
+String.blit src 1 dst 2 3 ;
+test src "abcd" ;
+test dst @@ Bytes.of_string "debcd"

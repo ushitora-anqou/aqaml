@@ -10,12 +10,38 @@ module Char = struct
   external code : char -> int = "aqaml_char_code"
 end
 
+type bytes = string
+
+module Bytes = struct
+  external length : bytes -> int = "aqaml_string_length"
+
+  external get : bytes -> int -> char = "aqaml_string_get"
+
+  external set : bytes -> int -> char -> unit = "aqaml_string_set"
+
+  external blit :
+    bytes -> int -> bytes -> int -> int -> unit
+    = "aqaml_string_blit"
+
+  external blit_string :
+    string -> int -> bytes -> int -> int -> unit
+    = "aqaml_string_blit"
+
+  let of_string str = str
+
+  let to_string bytes = bytes
+end
+
 module String = struct
   external length : string -> int = "aqaml_string_length"
 
   external get : string -> int -> char = "aqaml_string_get"
 
   external set : string -> int -> char -> unit = "aqaml_string_set"
+
+  external blit :
+    string -> int -> bytes -> int -> int -> unit
+    = "aqaml_string_blit"
 end
 
 exception Failure of string

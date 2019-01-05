@@ -145,6 +145,19 @@ void aqaml_string_set_detail(uint64_t str_src, uint64_t index, uint64_t chr)
     val.string->str[index] = (uint8_t)chr;
 }
 
+void aqaml_string_blit_detail(uint64_t src_src, uint64_t srcoff,
+                              uint64_t dst_src, uint64_t dstoff, uint64_t len)
+{
+    AQamlValue src = get_value(src_src), dst = get_value(dst_src);
+    assert(src.kind == AQAML_STRING && dst.kind == AQAML_STRING);
+    uint64_t src_len = aqaml_string_length_detail(src_src),
+             dst_len = aqaml_string_length_detail(dst_src);
+    assert(srcoff + len <= src_len && dstoff + len <= dst_len);
+
+    for (uint64_t i = 0; i < len; i++)
+        dst.string->str[dstoff + i] = src.string->str[srcoff + i];
+}
+
 void aqaml_print_string_detail(uint64_t ptr)
 {
     AQamlValue val = get_value(ptr);
