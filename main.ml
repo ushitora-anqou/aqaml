@@ -140,6 +140,7 @@ type token =
   | NarutoNaruto
   | External
   | LArrow
+  | Mutable
 
 exception Unexpected_token
 
@@ -209,6 +210,7 @@ let string_of_token = function
   | NarutoNaruto -> "@@"
   | External -> "external"
   | LArrow -> "<-"
+  | Mutable -> "mutable"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -346,6 +348,7 @@ let tokenize program =
           | "struct" -> Struct
           | "end" -> End
           | "external" -> External
+          | "mutable" -> Mutable
           | _ -> Ident str )
           :: aux i
       | '+' -> Plus :: aux i
@@ -465,6 +468,7 @@ type ast =
   | TypeAnd of typedef list
   | CtorApp of string option * string * ast option
   | RefAssign of ast * ast
+  | RecordAssign of string option * ast * string * ast
   | Deref of ast
   | ExpDef of string * typ option
   | TryWith of ast * (pattern * ast option * ast) list
@@ -730,6 +734,8 @@ let parse tokens =
         let tokens, rhs = parse_let tokens in
         match lhs with
         | StringGet (str, idx) -> (tokens, StringSet (str, idx, rhs))
+        | RecordDotAccess (None, lhs, fieldname) ->
+            (tokens, RecordAssign (None, lhs, fieldname, rhs))
         | _ -> raise Unexpected_token )
     | _ -> (tokens, lhs)
   and parse_if = function
@@ -1028,9 +1034,12 @@ let parse tokens =
           match tokens with
           | Ident str :: _ when is_capital str.[0] -> parse_variant tokens
           | Bar :: _ -> parse_variant tokens
-          | LBrace :: Ident fieldname :: Colon :: tokens ->
+          (* TODO: skip mutable *)
+          | LBrace :: Ident fieldname :: Colon :: tokens
+           |LBrace :: Mutable :: Ident fieldname :: Colon :: tokens ->
               let rec aux fields = function
-                | Semicolon :: Ident fieldname :: Colon :: tokens ->
+                | Semicolon :: Ident fieldname :: Colon :: tokens
+                 |Semicolon :: Mutable :: Ident fieldname :: Colon :: tokens ->
                     let tokens, typexpr = parse_typexpr tokens in
                     aux ((fieldname, typexpr) :: fields) tokens
                 | RBrace :: tokens -> (tokens, fields)
@@ -1251,6 +1260,9 @@ let analyze asts =
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
+    | RecordAssign (None, lhs, fieldname, rhs) ->
+        let typename = Hashtbl.find toplevel.records fieldname in
+        RecordAssign (Some typename, aux env lhs, fieldname, aux env rhs)
     | Deref ast -> Deref (aux env ast)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
@@ -2040,6 +2052,17 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "pop rbx" ;
         appstr buf "pop rax" ;
         appstr buf "mov [rax], rbx" ;
+        (* push unit value *)
+        appstr buf "push 1" ;
+        Buffer.contents buf
+    | RecordAssign (Some typename, lhs, fieldname, rhs) ->
+        let idx = Hashtbl.find records_idx (typename, fieldname) in
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rbx" ;
+        appstr buf "pop rax" ;
+        appfmt buf "mov [rax + %d], rbx" (idx * 8) ;
         (* push unit value *)
         appstr buf "push 1" ;
         Buffer.contents buf

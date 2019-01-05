@@ -1525,3 +1525,14 @@ dst.[0] <- 'd' ;
 dst.[1] <- 'e' ;
 String.blit src 1 dst 2 3 ;
 test dst @@ Bytes.of_string "debcd"
+
+type testrecord2 =
+  {mutable testrecord2_int: int; mutable testrecord2_str: string}
+
+;;
+let r = {testrecord2_int= 12; testrecord2_str= "abc"} in
+test r.testrecord2_str "abc" ;
+r.testrecord2_str <- "def" ;
+test r.testrecord2_str "def" ;
+r.testrecord2_int <- 35 ;
+test r.testrecord2_int 35
