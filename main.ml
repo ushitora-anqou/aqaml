@@ -2506,6 +2506,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_char_code:" ;
     appstr buf "ret" ;
     appstr buf "" ;
+    appstr buf "aqaml_string_of_int:" ;
+    appstr buf @@ untag_int "rax" ;
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_string_of_int_detail@PLT" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
     appstr buf "aqaml_print_string:" ;
     appstr buf "mov rdi, rax" ;
     appstr buf "call aqaml_print_string_detail@PLT" ;

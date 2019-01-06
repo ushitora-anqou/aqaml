@@ -6,6 +6,10 @@ external exit : int -> 'a = "aqaml_exit"
 
 external print_string : string -> unit = "aqaml_print_string"
 
+external string_of_int : int -> string = "aqaml_string_of_int"
+
+external int_of_char : char -> int = "aqaml_char_code"
+
 exception Match_failure of string * int * int
 
 exception Not_found
@@ -19,8 +23,6 @@ let failwith str = raise (Failure str)
 module Char = struct
   external code : char -> int = "aqaml_char_code"
 end
-
-let int_of_char ch = Char.code ch
 
 type bytes = string
 

@@ -207,3 +207,27 @@ uint64_t aqaml_concat_list_detail(uint64_t lhs_src, uint64_t rhs_src)
 
     return lhs_src;
 }
+
+uint64_t aqaml_string_of_int_detail(int64_t num)
+{
+    // calculate length
+    uint64_t tmp = num < 0 ? -num : num, length = 0;
+    if (num < 0) length++;
+    do {
+        length++;
+    } while (tmp /= 10);
+
+    // create string
+    uint64_t ret_src = aqaml_string_create_detail(length);
+    AQamlValue ret = get_value(ret_src);
+    tmp = num < 0 ? -num : num;
+    for (uint64_t i = length - 1;; i--) {
+        ret.string->str[i] = '0' + tmp % 10;
+        tmp /= 10;
+        if (tmp == 0) break;
+    }
+    if (num < 0) ret.string->str[0] = '-';
+
+    return ret_src;
+}
+

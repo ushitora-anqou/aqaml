@@ -1565,3 +1565,25 @@ test (String.concat "." ["abc"]) "abc" ;
 test (String.concat "." []) "" ;
 let string_of_list src = "[" ^ String.concat "; " src ^ "]" in
 test (string_of_list ["a"; "b"; "c"]) "[a; b; c]"
+
+;;
+let escape_string str =
+  let buf = Buffer.create (String.length str) in
+  let rec aux i =
+    if i < String.length str then (
+      ( match str.[i] with
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '"' -> Buffer.add_string buf "\\\""
+      | ch -> Buffer.add_char buf ch ) ;
+      aux (i + 1) )
+  in
+  aux 0 ; Buffer.contents buf
+in
+test (escape_string "\n\t\\\"") "\\n\\t\\\\\\\""
+
+;;
+test (string_of_int 20) "20" ;
+test (string_of_int 0) "0" ;
+test (string_of_int (-12)) "-12"
