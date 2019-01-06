@@ -50,22 +50,6 @@ module Bytes = struct
   let to_string bytes = bytes
 end
 
-module String = struct
-  external length : string -> int = "aqaml_string_length"
-
-  external get : string -> int -> char = "aqaml_string_get"
-
-  external set : string -> int -> char -> unit = "aqaml_string_set"
-
-  external create : int -> bytes = "aqaml_string_create"
-
-  external sub : string -> int -> int -> string = "aqaml_string_sub"
-
-  external blit :
-    string -> int -> bytes -> int -> int -> unit
-    = "aqaml_string_blit"
-end
-
 module List = struct
   let rec length = function _ :: xs -> 1 + length xs | _ -> 0
 
@@ -117,6 +101,41 @@ module List = struct
       | [] -> acc
     in
     List.rev (aux [] lst)
+end
+
+module String = struct
+  external length : string -> int = "aqaml_string_length"
+
+  external get : string -> int -> char = "aqaml_string_get"
+
+  external set : string -> int -> char -> unit = "aqaml_string_set"
+
+  external create : int -> bytes = "aqaml_string_create"
+
+  external sub : string -> int -> int -> string = "aqaml_string_sub"
+
+  external blit :
+    string -> int -> bytes -> int -> int -> unit
+    = "aqaml_string_blit"
+
+  let concat sep = function
+    | [] -> ""
+    | lst ->
+        let seplen = length sep in
+        let sum_length = List.fold_left (fun acc s -> acc + length s) 0 lst in
+        let buf =
+          Bytes.create @@ (sum_length + (seplen * (List.length lst - 1)))
+        in
+        let rec aux pos = function
+          | [] -> ()
+          | [hd] -> Bytes.blit_string hd 0 buf pos @@ length hd
+          | hd :: tl ->
+              let hdlen = length hd in
+              Bytes.blit_string hd 0 buf pos hdlen ;
+              Bytes.blit_string sep 0 buf (pos + hdlen) seplen ;
+              aux (pos + hdlen + seplen) tl
+        in
+        aux 0 lst ; Bytes.to_string buf
 end
 
 module Buffer = struct

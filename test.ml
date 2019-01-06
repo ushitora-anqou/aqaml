@@ -1557,3 +1557,11 @@ test (Buffer.contents buf) "abcdefghi" ;
 Buffer.add_string buf "jk" ;
 Buffer.add_string buf "lm" ;
 test (Buffer.contents buf) "abcdefghijklm"
+
+;;
+test (String.concat ";" ["abc"; "def"; "ghi"]) "abc;def;ghi" ;
+test (String.concat "." ["abc"; "def"; "ghi"]) "abc.def.ghi" ;
+test (String.concat "." ["abc"]) "abc" ;
+test (String.concat "." []) "" ;
+let string_of_list src = "[" ^ String.concat "; " src ^ "]" in
+test (string_of_list ["a"; "b"; "c"]) "[a; b; c]"
