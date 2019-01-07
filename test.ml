@@ -1598,4 +1598,7 @@ test (Printf.sprintf "abc%d%d" 1 2) "abc12" ;
 test (Printf.sprintf "abc%d%d%d" 1 2 3) "abc123" ;
 test (Printf.sprintf "abc%d%d%d%d" 1 2 3 4) "abc1234" ;
 test (Printf.sprintf "abc%d%d%d%d%d" 1 2 3 4 5) "abc12345" ;
-test (Printf.sprintf "abc%d%d%d%d%d" 1 (-2) 3 4 5) "abc1-2345"
+test (Printf.sprintf "abc%d%d%d%d%d" 1 (-2) 3 4 5) "abc1-2345" ;
+test (Printf.sprintf "abc%s" "def") "abcdef" ;
+test (Printf.sprintf "abc%s%s" "def" "ghi") "abcdefghi" ;
+test (Printf.sprintf "abc%s%d%s" "def" 10 "ghi") "abcdef10ghi"

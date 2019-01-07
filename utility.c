@@ -277,6 +277,15 @@ uint64_t aqaml_vsprintf_detail(uint8_t *buf, uint8_t *fmt, uint64_t fmt_len,
             while (--i >= 0) aqaml_write_buffer(buf, &widx, '0' + dig[i]);
         } break;
 
+        case 's': {
+            uint64_t str_src = *args++;
+            AQamlValue str = get_value(str_src);
+            // assert(str.kind == AQAML_STRING);
+            uint64_t len = aqaml_string_length_detail(str_src);
+            for (uint64_t i = 0; i < len; i++)
+                aqaml_write_buffer(buf, &widx, str.string->str[i]);
+        } break;
+
         default:
             assert(0);
         }
