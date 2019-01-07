@@ -166,6 +166,14 @@ uint64_t aqaml_string_sub_detail(uint64_t str_src, uint64_t start, uint64_t len)
     return ret_src;
 }
 
+uint64_t aqaml_string_make_detail(uint64_t n, uint64_t c)
+{
+    uint64_t ret_src = aqaml_string_create_detail(n);
+    AQamlValue ret = get_value(ret_src);
+    for (uint64_t i = 0; i < n; i++) ret.string->str[i] = (uint8_t)c;
+    return ret_src;
+}
+
 void aqaml_string_blit_detail(uint64_t src_src, uint64_t srcoff,
                               uint64_t dst_src, uint64_t dstoff, uint64_t len)
 {

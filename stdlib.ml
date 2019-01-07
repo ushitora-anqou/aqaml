@@ -116,6 +116,8 @@ module String = struct
 
   external sub : string -> int -> int -> string = "aqaml_string_sub"
 
+  external make : int -> char -> string = "aqaml_string_make"
+
   external blit :
     string -> int -> bytes -> int -> int -> unit
     = "aqaml_string_blit"

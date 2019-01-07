@@ -1587,3 +1587,6 @@ test (escape_string "\n\t\\\"") "\\n\\t\\\\\\\""
 test (string_of_int 20) "20" ;
 test (string_of_int 0) "0" ;
 test (string_of_int (-12)) "-12"
+
+;;
+test (String.make 3 'b') "bbb"
