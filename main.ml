@@ -120,6 +120,8 @@ type token =
   | Of
   | KwInt
   | KwChar
+  | KwUnit
+  | KwBool
   | KwString
   | Apostrophe
   | And
@@ -194,6 +196,8 @@ let string_of_token = function
   | Of -> "of"
   | KwInt -> "int"
   | KwChar -> "char"
+  | KwUnit -> "unit"
+  | KwBool -> "bool"
   | KwString -> "string"
   | Apostrophe -> "'"
   | And -> "and"
@@ -343,6 +347,8 @@ let tokenize program =
           | "of" -> Of :: aux i
           | "int" -> KwInt :: aux i
           | "char" -> KwChar :: aux i
+          | "unit" -> KwUnit :: aux i
+          | "bool" -> KwBool :: aux i
           | "string" -> KwString :: aux i
           | "and" -> And :: aux i
           | "try" -> Try :: aux i
@@ -440,6 +446,8 @@ let tokenize program =
 type typ =
   | TyInt
   | TyChar
+  | TyUnit
+  | TyBool
   | TyString
   | TyTuple of typ list
   | TyCustom of string
@@ -962,6 +970,8 @@ let parse tokens =
   and parse_typexpr_primary = function
     | KwInt :: tokens -> (tokens, TyInt)
     | KwChar :: tokens -> (tokens, TyChar)
+    | KwUnit :: tokens -> (tokens, TyUnit)
+    | KwBool :: tokens -> (tokens, TyBool)
     | KwString :: tokens -> (tokens, TyString)
     | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
     | (LowerIdent typename | LowerIdentWithModule typename) :: tokens ->
@@ -1683,6 +1693,8 @@ let analyze asts =
   , !(toplevel.exps_list) )
 
 type gen_environment = {offset: int; varoffset: int HashMap.t}
+
+type ctype = CTyInt | CTyUnit | CTyPtr
 
 let rec generate (letfuncs, strings, typedefs, exps) =
   let stack_size = ref 0 in
@@ -2416,115 +2428,58 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   in
   let main_code =
     let buf = Buffer.create 512 in
-    appstr buf "aqaml_malloc:" ;
-    appstr buf @@ untag_int "rax" ;
-    appstr buf "mov edi, eax" ;
-    appstr buf "call aqaml_malloc_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_structural_equal:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "call aqaml_structural_equal_detail@PLT" ;
-    appstr buf @@ tag_int "rax" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
+    let gen_c_func funcname argument_types ret_type =
+      appfmt buf "%s:" funcname ;
+      List.iteri
+        (fun i -> function
+          | CTyInt | CTyUnit -> appstr buf @@ untag_int @@ reg_of_index i
+          | _ -> () )
+        argument_types ;
+      for i = List.length argument_types - 1 downto 0 do
+        appfmt buf "mov %s"
+        @@
+        match i with
+        | 0 -> "rdi, rax"
+        | 1 -> "rsi, rbx"
+        | 2 -> "rdx, rdi"
+        | 3 -> "rcx, rsi"
+        | 4 -> "r8, rdx"
+        | 5 -> "r9, rcx"
+        | _ ->
+            failwith "C function with more than 6 arguments can't be handled."
+      done ;
+      appfmt buf "call %s_detail@PLT" funcname ;
+      ( match ret_type with
+      | CTyInt -> appstr buf @@ tag_int "rax"
+      | CTyUnit -> appfmt buf "mov rax, %d" @@ tagged_int 0
+      | CTyPtr -> () ) ;
+      appstr buf "ret" ; appstr buf ""
+    in
+    gen_c_func "aqaml_malloc" [CTyInt] CTyPtr ;
+    gen_c_func "aqaml_structural_equal" [CTyPtr; CTyPtr] CTyInt ;
+    gen_c_func "aqaml_concat_string" [CTyPtr; CTyPtr] CTyPtr ;
+    gen_c_func "aqaml_concat_list" [CTyPtr; CTyPtr] CTyPtr ;
+    gen_c_func "aqaml_string_length" [CTyPtr] CTyInt ;
+    gen_c_func "aqaml_string_get" [CTyPtr; CTyInt] CTyInt ;
+    gen_c_func "aqaml_string_set" [CTyPtr; CTyInt; CTyInt] CTyInt ;
+    gen_c_func "aqaml_string_create" [CTyInt] CTyPtr ;
+    gen_c_func "aqaml_string_blit"
+      [CTyPtr; CTyInt; CTyPtr; CTyInt; CTyInt]
+      CTyUnit ;
+    gen_c_func "aqaml_string_sub" [CTyPtr; CTyInt; CTyInt] CTyPtr ;
+    gen_c_func "aqaml_string_make" [CTyInt; CTyInt] CTyPtr ;
+    gen_c_func "aqaml_string_of_int" [CTyInt] CTyPtr ;
+    gen_c_func "aqaml_print_string" [CTyPtr] CTyUnit ;
     appstr buf "aqaml_structural_inequal:" ;
     appstr buf "mov rdi, rax" ;
     appstr buf "mov rsi, rbx" ;
     appstr buf "call aqaml_structural_equal_detail@PLT" ;
-    (* eax == 0 *)
     appstr buf "test eax, eax" ;
     appstr buf "sete al" ;
     appstr buf @@ tag_int "rax" ;
     appstr buf "ret" ;
     appstr buf "" ;
-    appstr buf "aqaml_concat_string:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "call aqaml_concat_string_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_concat_list:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "call aqaml_concat_list_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_length:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_length_detail@PLT" ;
-    appstr buf @@ tag_int "rax" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_get:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf @@ untag_int "rbx" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "call aqaml_string_get_detail@PLT" ;
-    appstr buf @@ tag_int "rax" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_set:" ;
-    appstr buf @@ untag_int "rbx" ;
-    appstr buf @@ untag_int "rdi" ;
-    appstr buf "mov rdx, rdi" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_set_detail@PLT" ;
-    appfmt buf "mov rax, %d" @@ tagged_int 0 ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_create:" ;
-    appstr buf @@ untag_int "rax" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_create_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_blit:" ;
-    appstr buf @@ untag_int "rbx" ;
-    appstr buf @@ untag_int "rsi" ;
-    appstr buf @@ untag_int "rdx" ;
-    appstr buf "mov r8, rdx" ;
-    appstr buf "mov rcx, rsi" ;
-    appstr buf "mov rdx, rdi" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_blit_detail@PLT" ;
-    appfmt buf "mov rax, %d" @@ tagged_int 0 ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_sub:" ;
-    appstr buf @@ untag_int "rbx" ;
-    appstr buf @@ untag_int "rdi" ;
-    appstr buf "mov rdx, rdi" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_sub_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_make:" ;
-    appstr buf @@ untag_int "rax" ;
-    appstr buf @@ untag_int "rbx" ;
-    appstr buf "mov rsi, rbx" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_make_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
     appstr buf "aqaml_char_code:" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_string_of_int:" ;
-    appstr buf @@ untag_int "rax" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_string_of_int_detail@PLT" ;
-    appstr buf "ret" ;
-    appstr buf "" ;
-    appstr buf "aqaml_print_string:" ;
-    appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_print_string_detail@PLT" ;
-    (* return unit value *)
-    appstr buf "mov rax, 1" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_exit:" ;
@@ -2541,6 +2496,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_raise:" ;
     appstr buf @@ gen_raise () ;
     appstr buf "" ;
+    (* emit aqaml_appcls%d *)
     for nargs = 1 to 9 do
       let label_loop = make_label () in
       let label_exit = make_label () in
