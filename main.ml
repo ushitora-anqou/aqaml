@@ -2470,6 +2470,19 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_string_make" [CTyInt; CTyInt] CTyPtr ;
     gen_c_func "aqaml_string_of_int" [CTyInt] CTyPtr ;
     gen_c_func "aqaml_print_string" [CTyPtr] CTyUnit ;
+    gen_c_func "aqaml_printf_sprintf" [CTyPtr] CTyPtr ;
+    appstr buf
+      ".global aqaml_printf_sprintf1, aqaml_printf_sprintf2, \
+       aqaml_printf_sprintf3, aqaml_printf_sprintf4, aqaml_printf_sprintf5" ;
+    gen_c_func "aqaml_printf_sprintf1" [CTyPtr; CTyPtr] CTyPtr ;
+    gen_c_func "aqaml_printf_sprintf2" [CTyPtr; CTyPtr; CTyPtr] CTyPtr ;
+    gen_c_func "aqaml_printf_sprintf3" [CTyPtr; CTyPtr; CTyPtr; CTyPtr] CTyPtr ;
+    gen_c_func "aqaml_printf_sprintf4"
+      [CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr]
+      CTyPtr ;
+    gen_c_func "aqaml_printf_sprintf5"
+      [CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr]
+      CTyPtr ;
     appstr buf "aqaml_structural_inequal:" ;
     appstr buf "mov rdi, rax" ;
     appstr buf "mov rsi, rbx" ;

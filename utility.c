@@ -1,6 +1,7 @@
 // For x86-64
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@ typedef struct AQamlValue {
     } kind;
 
     union {
-        uint64_t integer;
+        int64_t integer;
 
         struct {
             uint64_t header;
@@ -239,3 +240,143 @@ uint64_t aqaml_string_of_int_detail(int64_t num)
     return ret_src;
 }
 
+void aqaml_write_buffer(uint8_t *buf, uint64_t *widx, uint8_t ch)
+{
+    if (buf) buf[*widx] = ch;
+    (*widx)++;
+}
+
+uint64_t aqaml_vsprintf_detail(uint8_t *buf, uint8_t *fmt, uint64_t fmt_len,
+                               uint64_t *args)
+{
+    uint64_t widx = 0;
+
+    for (uint64_t i = 0; i < fmt_len; i++) {
+        if (fmt[i] != '%') {
+            aqaml_write_buffer(buf, &widx, fmt[i]);
+            continue;
+        }
+
+        i++;
+        switch (fmt[i]) {
+        case 'd': {
+            AQamlValue num = get_value(*args++);
+            assert(num.kind == AQAML_INTEGER);
+            int64_t ival = num.integer >> 1;
+            if (ival == 0) {
+                aqaml_write_buffer(buf, &widx, '0');
+                break;
+            }
+            if (ival < 0) {
+                aqaml_write_buffer(buf, &widx, '-');
+                ival *= -1;
+            }
+            // max_int = 4611686018427387903, so size should be >= 20
+            int8_t i = 0, dig[25];
+            for (; ival != 0; ival /= 10) dig[i++] = ival % 10;
+            while (--i >= 0) aqaml_write_buffer(buf, &widx, '0' + dig[i]);
+        } break;
+
+        default:
+            assert(0);
+        }
+    }
+
+    return widx;
+}
+
+uint64_t aqaml_safe_sprintf(uint64_t fmt_src, uint64_t *args)
+{
+    AQamlValue fmt = get_value(fmt_src);
+    // assert(fmt.kind == AQAML_STRING);
+    uint64_t fmt_len = aqaml_string_length_detail(fmt_src);
+    uint64_t result_len =
+        aqaml_vsprintf_detail(NULL, fmt.string->str, fmt_len, args);
+    uint64_t ret_src = aqaml_string_create_detail(result_len);
+    AQamlValue ret = get_value(ret_src);
+    aqaml_vsprintf_detail(ret.string->str, fmt.string->str, fmt_len, args);
+    return ret_src;
+}
+
+uint64_t aqaml_printf_sprintf1_detail(uint64_t arg0_src, uint64_t *fmt_src_ptr)
+{
+    uint64_t args[] = {arg0_src};
+    uint64_t fmt_src = *fmt_src_ptr;
+    return aqaml_safe_sprintf(fmt_src, args);
+}
+
+uint64_t aqaml_printf_sprintf2_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                      uint64_t *fmt_src_ptr)
+{
+    uint64_t args[] = {arg0_src, arg1_src};
+    uint64_t fmt_src = *fmt_src_ptr;
+    return aqaml_safe_sprintf(fmt_src, args);
+}
+
+uint64_t aqaml_printf_sprintf3_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                      uint64_t arg2_src, uint64_t *fmt_src_ptr)
+{
+    uint64_t args[] = {arg0_src, arg1_src, arg2_src};
+    uint64_t fmt_src = *fmt_src_ptr;
+    return aqaml_safe_sprintf(fmt_src, args);
+}
+
+uint64_t aqaml_printf_sprintf4_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                      uint64_t arg2_src, uint64_t arg3_src,
+                                      uint64_t *fmt_src_ptr)
+{
+    uint64_t args[] = {arg0_src, arg1_src, arg2_src, arg3_src};
+    uint64_t fmt_src = *fmt_src_ptr;
+    return aqaml_safe_sprintf(fmt_src, args);
+}
+
+uint64_t aqaml_printf_sprintf5_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                      uint64_t arg2_src, uint64_t arg3_src,
+                                      uint64_t arg4_src, uint64_t *fmt_src_ptr)
+{
+    uint64_t args[] = {arg0_src, arg1_src, arg2_src, arg3_src, arg4_src};
+    uint64_t fmt_src = *fmt_src_ptr;
+    return aqaml_safe_sprintf(fmt_src, args);
+}
+
+// dummy
+void aqaml_printf_sprintf1(void);
+void aqaml_printf_sprintf2(void);
+void aqaml_printf_sprintf3(void);
+void aqaml_printf_sprintf4(void);
+void aqaml_printf_sprintf5(void);
+
+uint64_t aqaml_printf_sprintf_detail(uint64_t fmt_src)
+{
+    AQamlValue fmt = get_value(fmt_src);
+    // assert(fmt.kind == AQAML_STRING);
+    uint64_t fmt_len = aqaml_string_length_detail(fmt_src);
+
+    // Count how many arguments should be taken.
+    uint64_t cnt = 0;
+    for (uint64_t i = 0; i < fmt_len; i++) {
+        if (fmt.string->str[i] != '%') continue;
+        i++;
+        assert(i != fmt_len);
+        if (fmt.string->str[i] == '%') continue;
+        cnt++;
+    }
+
+    // TODO: more than 5
+    uint64_t functable[] = {(uint64_t)0,
+                            (uint64_t)aqaml_printf_sprintf1,
+                            (uint64_t)aqaml_printf_sprintf2,
+                            (uint64_t)aqaml_printf_sprintf3,
+                            (uint64_t)aqaml_printf_sprintf4,
+                            (uint64_t)aqaml_printf_sprintf5};
+
+    if (functable[cnt] == 0) return fmt_src;
+
+    uint64_t ret_src = aqaml_alloc_block(3, 0, 247);
+    AQamlValue ret = get_value(ret_src);
+    ret.array->data[0] = functable[cnt];
+    ret.array->data[1] = cnt;
+    ret.array->data[2] = fmt_src;
+
+    return ret_src;
+}

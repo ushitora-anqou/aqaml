@@ -166,3 +166,7 @@ module Buffer = struct
     Bytes.blit_string str 0 src.buf src.len str_len ;
     src.len <- src.len + str_len
 end
+
+module Printf = struct
+  external sprintf : ('a, unit, string) format -> 'a = "aqaml_printf_sprintf"
+end
