@@ -1601,4 +1601,6 @@ test (Printf.sprintf "abc%d%d%d%d%d" 1 2 3 4 5) "abc12345" ;
 test (Printf.sprintf "abc%d%d%d%d%d" 1 (-2) 3 4 5) "abc1-2345" ;
 test (Printf.sprintf "abc%s" "def") "abcdef" ;
 test (Printf.sprintf "abc%s%s" "def" "ghi") "abcdefghi" ;
-test (Printf.sprintf "abc%s%d%s" "def" 10 "ghi") "abcdef10ghi"
+test (Printf.sprintf "abc%s%d%s" "def" 10 "ghi") "abcdef10ghi" ;
+test (Printf.sprintf "abc%c" 'd') "abcd" ;
+test (Printf.sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i"

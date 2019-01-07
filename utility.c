@@ -286,6 +286,12 @@ uint64_t aqaml_vsprintf_detail(uint8_t *buf, uint8_t *fmt, uint64_t fmt_len,
                 aqaml_write_buffer(buf, &widx, str.string->str[i]);
         } break;
 
+        case 'c': {
+            AQamlValue chr = get_value(*args++);
+            assert(chr.kind == AQAML_INTEGER);
+            aqaml_write_buffer(buf, &widx, (uint8_t)(chr.integer >> 1));
+        } break;
+
         default:
             assert(0);
         }
