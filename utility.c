@@ -31,6 +31,7 @@ typedef struct AQamlValue {
 
 uint64_t aqaml_string_length_detail(uint64_t ptr);
 uint64_t aqaml_string_create_detail(uint64_t len);
+uint64_t aqaml_appcls_detail(uint64_t nargs, uint64_t cls_src, uint64_t *args);
 
 void *aqaml_malloc_detail(uint32_t size)
 {
@@ -313,55 +314,60 @@ uint64_t aqaml_safe_sprintf(uint64_t fmt_src, uint64_t *args)
     return ret_src;
 }
 
-uint64_t aqaml_printf_sprintf1_detail(uint64_t arg0_src, uint64_t *fmt_src_ptr)
+uint64_t aqaml_printf_ksprintf1_detail(uint64_t arg0_src, uint64_t *fmt_src_ptr)
 {
     uint64_t args[] = {arg0_src};
-    uint64_t fmt_src = *fmt_src_ptr;
-    return aqaml_safe_sprintf(fmt_src, args);
+    uint64_t fmt_src = *fmt_src_ptr, cls_src = *(fmt_src_ptr + 1);
+    uint64_t str_src = aqaml_safe_sprintf(fmt_src, args);
+    return aqaml_appcls_detail(1, cls_src, &str_src);
 }
 
-uint64_t aqaml_printf_sprintf2_detail(uint64_t arg0_src, uint64_t arg1_src,
-                                      uint64_t *fmt_src_ptr)
+uint64_t aqaml_printf_ksprintf2_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                       uint64_t *fmt_src_ptr)
 {
     uint64_t args[] = {arg0_src, arg1_src};
-    uint64_t fmt_src = *fmt_src_ptr;
-    return aqaml_safe_sprintf(fmt_src, args);
+    uint64_t fmt_src = *fmt_src_ptr, cls_src = *(fmt_src_ptr + 1);
+    uint64_t str_src = aqaml_safe_sprintf(fmt_src, args);
+    return aqaml_appcls_detail(1, cls_src, &str_src);
 }
 
-uint64_t aqaml_printf_sprintf3_detail(uint64_t arg0_src, uint64_t arg1_src,
-                                      uint64_t arg2_src, uint64_t *fmt_src_ptr)
+uint64_t aqaml_printf_ksprintf3_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                       uint64_t arg2_src, uint64_t *fmt_src_ptr)
 {
     uint64_t args[] = {arg0_src, arg1_src, arg2_src};
-    uint64_t fmt_src = *fmt_src_ptr;
-    return aqaml_safe_sprintf(fmt_src, args);
+    uint64_t fmt_src = *fmt_src_ptr, cls_src = *(fmt_src_ptr + 1);
+    uint64_t str_src = aqaml_safe_sprintf(fmt_src, args);
+    return aqaml_appcls_detail(1, cls_src, &str_src);
 }
 
-uint64_t aqaml_printf_sprintf4_detail(uint64_t arg0_src, uint64_t arg1_src,
-                                      uint64_t arg2_src, uint64_t arg3_src,
-                                      uint64_t *fmt_src_ptr)
+uint64_t aqaml_printf_ksprintf4_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                       uint64_t arg2_src, uint64_t arg3_src,
+                                       uint64_t *fmt_src_ptr)
 {
     uint64_t args[] = {arg0_src, arg1_src, arg2_src, arg3_src};
-    uint64_t fmt_src = *fmt_src_ptr;
-    return aqaml_safe_sprintf(fmt_src, args);
+    uint64_t fmt_src = *fmt_src_ptr, cls_src = *(fmt_src_ptr + 1);
+    uint64_t str_src = aqaml_safe_sprintf(fmt_src, args);
+    return aqaml_appcls_detail(1, cls_src, &str_src);
 }
 
-uint64_t aqaml_printf_sprintf5_detail(uint64_t arg0_src, uint64_t arg1_src,
-                                      uint64_t arg2_src, uint64_t arg3_src,
-                                      uint64_t arg4_src, uint64_t *fmt_src_ptr)
+uint64_t aqaml_printf_ksprintf5_detail(uint64_t arg0_src, uint64_t arg1_src,
+                                       uint64_t arg2_src, uint64_t arg3_src,
+                                       uint64_t arg4_src, uint64_t *fmt_src_ptr)
 {
     uint64_t args[] = {arg0_src, arg1_src, arg2_src, arg3_src, arg4_src};
-    uint64_t fmt_src = *fmt_src_ptr;
-    return aqaml_safe_sprintf(fmt_src, args);
+    uint64_t fmt_src = *fmt_src_ptr, cls_src = *(fmt_src_ptr + 1);
+    uint64_t str_src = aqaml_safe_sprintf(fmt_src, args);
+    return aqaml_appcls_detail(1, cls_src, &str_src);
 }
 
 // dummy
-void aqaml_printf_sprintf1(void);
-void aqaml_printf_sprintf2(void);
-void aqaml_printf_sprintf3(void);
-void aqaml_printf_sprintf4(void);
-void aqaml_printf_sprintf5(void);
+void aqaml_printf_ksprintf1(void);
+void aqaml_printf_ksprintf2(void);
+void aqaml_printf_ksprintf3(void);
+void aqaml_printf_ksprintf4(void);
+void aqaml_printf_ksprintf5(void);
 
-uint64_t aqaml_printf_sprintf_detail(uint64_t fmt_src)
+uint64_t aqaml_printf_ksprintf_detail(uint64_t callback_src, uint64_t fmt_src)
 {
     AQamlValue fmt = get_value(fmt_src);
     // assert(fmt.kind == AQAML_STRING);
@@ -379,19 +385,21 @@ uint64_t aqaml_printf_sprintf_detail(uint64_t fmt_src)
 
     // TODO: more than 5
     uint64_t functable[] = {(uint64_t)0,
-                            (uint64_t)aqaml_printf_sprintf1,
-                            (uint64_t)aqaml_printf_sprintf2,
-                            (uint64_t)aqaml_printf_sprintf3,
-                            (uint64_t)aqaml_printf_sprintf4,
-                            (uint64_t)aqaml_printf_sprintf5};
+                            (uint64_t)aqaml_printf_ksprintf1,
+                            (uint64_t)aqaml_printf_ksprintf2,
+                            (uint64_t)aqaml_printf_ksprintf3,
+                            (uint64_t)aqaml_printf_ksprintf4,
+                            (uint64_t)aqaml_printf_ksprintf5};
 
-    if (functable[cnt] == 0) return fmt_src;
+    if (functable[cnt] == 0)
+        return aqaml_appcls_detail(1, callback_src, &fmt_src);
 
     uint64_t ret_src = aqaml_alloc_block(3, 0, 247);
     AQamlValue ret = get_value(ret_src);
     ret.array->data[0] = functable[cnt];
     ret.array->data[1] = cnt;
     ret.array->data[2] = fmt_src;
+    ret.array->data[3] = callback_src;
 
     return ret_src;
 }

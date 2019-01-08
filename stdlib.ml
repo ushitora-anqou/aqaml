@@ -168,5 +168,11 @@ module Buffer = struct
 end
 
 module Printf = struct
-  external sprintf : ('a, unit, string) format -> 'a = "aqaml_printf_sprintf"
+  external ksprintf :
+    (string -> 'd) -> ('a, unit, string, 'd) format4 -> 'a
+    = "aqaml_printf_ksprintf"
+
+  let sprintf fmt = ksprintf (fun str -> str) fmt
+
+  let printf fmt = ksprintf (fun str -> print_string str) fmt
 end

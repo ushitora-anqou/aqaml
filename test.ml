@@ -1603,4 +1603,6 @@ test (Printf.sprintf "abc%s" "def") "abcdef" ;
 test (Printf.sprintf "abc%s%s" "def" "ghi") "abcdefghi" ;
 test (Printf.sprintf "abc%s%d%s" "def" 10 "ghi") "abcdef10ghi" ;
 test (Printf.sprintf "abc%c" 'd') "abcd" ;
-test (Printf.sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i"
+test (Printf.sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i" ;
+test (Printf.ksprintf (fun str -> String.length str) "%s%s%d" "abc" "cde" 5) 7 ;
+test (Printf.ksprintf (fun str -> String.length str) "abc") 3
