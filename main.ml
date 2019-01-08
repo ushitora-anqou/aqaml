@@ -145,6 +145,7 @@ type token =
   | External
   | LArrow
   | Mutable
+  | Open
 
 exception Unexpected_token
 
@@ -221,6 +222,7 @@ let string_of_token = function
   | External -> "external"
   | LArrow -> "<-"
   | Mutable -> "mutable"
+  | Open -> "open"
 
 let rec eprint_token_list = function
   | token :: tokens ->
@@ -361,6 +363,7 @@ let tokenize program =
           | "end" -> End :: aux i
           | "external" -> External :: aux i
           | "mutable" -> Mutable :: aux i
+          | "open" -> Open :: aux i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
                 let i, ch = next_char i in
@@ -510,6 +513,7 @@ type ast =
   (* for analysis *)
   | ModuleDefEnd
   | ExternalDecl of string * typ * string
+  | OpenModuleDef of string
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
   | PtnAlias of pattern * ast
@@ -1131,6 +1135,9 @@ let parse tokens =
               let ast = ExternalDecl (id, typexpr, str) in
               aux (ast :: exprs) tokens
           | _ -> raise Unexpected_token )
+      | Open :: CapitalIdent modname :: tokens
+       |Open :: CapitalIdentWithModule modname :: tokens ->
+          aux (OpenModuleDef modname :: exprs) tokens
       | Module :: CapitalIdent modulename :: Equal :: Struct :: tokens ->
           let tokens, asts = aux [] tokens in
           let ast = ModuleDef (modulename, asts) in
@@ -1171,7 +1178,18 @@ type type_toplevel =
   ; exps: (string, string) Hashtbl.t
   ; records: (string, string) Hashtbl.t
   ; records_fields: (string, string list) Hashtbl.t
-  ; modulename: string list ref }
+  ; modulename: string list ref
+  ; (* TODO: opened_modulename should be in type environment
+   * rather than type type_toplevel, because
+   * functions, exceptions, types, and etc. in the opened module
+   * mask previously defined ones with the same names.
+   * For example, the current implementation doesn't allow the following code:
+   *     module ABC = struct let f () = 5 end ;;
+   *     let f () = 3 ;;
+   *     open ABC;;
+   *     test (f ()) 5 ;; (* expect 5 but will get 3 *)
+   *)
+    opened_modulename: string list ref }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1188,7 +1206,16 @@ let analyze asts =
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
     ; records_fields= Hashtbl.create 16
-    ; modulename= ref [] }
+    ; modulename= ref []
+    ; opened_modulename= ref [] }
+  in
+  let get_current_name_prefix () =
+    let buf = Buffer.create 128 in
+    List.iter (fun modname ->
+        Buffer.add_string buf modname ;
+        Buffer.add_char buf '.' )
+    @@ List.rev @@ !(toplevel.modulename) ;
+    Buffer.contents buf
   in
   let with_modulename name =
     String.concat "." @@ List.rev @@ (name :: !(toplevel.modulename))
@@ -1199,12 +1226,27 @@ let analyze asts =
     | exprs -> ExprSeq exprs
   in
   let hashtbl_find_with_modulename hashtbl name =
-    try (false, Hashtbl.find hashtbl name) with Not_found ->
-      (true, Hashtbl.find hashtbl (with_modulename name))
+    try ("", Hashtbl.find hashtbl name) with Not_found -> (
+      try
+        ( get_current_name_prefix ()
+        , Hashtbl.find hashtbl (with_modulename name) )
+      with Not_found ->
+        let modname =
+          List.find
+            (fun modname -> Hashtbl.mem hashtbl (modname ^ name))
+            !(toplevel.opened_modulename)
+        in
+        (modname, Hashtbl.find hashtbl (modname ^ name)) )
   in
   let hashmap_find_with_modulename name hashmap =
-    try HashMap.find name hashmap with Not_found ->
-      HashMap.find (with_modulename name) hashmap
+    try HashMap.find name hashmap with Not_found -> (
+      try HashMap.find (with_modulename name) hashmap with Not_found ->
+        let modname =
+          List.find
+            (fun modname -> HashMap.mem (modname ^ name) hashmap)
+            !(toplevel.opened_modulename)
+        in
+        HashMap.find (modname ^ name) hashmap )
   in
   let find_symbol env name =
     let rec aux depth env =
@@ -1263,15 +1305,13 @@ let analyze asts =
     | TupleValue values -> TupleValue (List.map (aux env) values)
     | RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
-        let withmod, typename =
+        let name_prefix, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
         in
         RecordValue
           ( Some typename
           , List.map
-              (fun (name, ast) ->
-                ((if withmod then with_modulename name else name), aux env ast)
-                )
+              (fun (name, ast) -> (name_prefix ^ name, aux env ast))
               fields )
     | RecordValueWith (base, fields) ->
         let key_fieldname, _ = List.hd fields in
@@ -1294,13 +1334,10 @@ let analyze asts =
                             , RecordDotAccess (None, new_base, fieldname) ) )
                         fieldnames )) )
     | RecordDotAccess (None, ast, fieldname) ->
-        let withmod, typename =
+        let name_prefix, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
-        RecordDotAccess
-          ( Some typename
-          , aux env ast
-          , if withmod then with_modulename fieldname else fieldname )
+        RecordDotAccess (Some typename, aux env ast, name_prefix ^ fieldname)
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -1314,14 +1351,11 @@ let analyze asts =
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
     | RecordAssign (None, lhs, fieldname, rhs) ->
-        let withmod, typename =
+        let name_prefix, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
         RecordAssign
-          ( Some typename
-          , aux env lhs
-          , (if withmod then with_modulename fieldname else fieldname)
-          , aux env rhs )
+          (Some typename, aux env lhs, name_prefix ^ fieldname, aux env rhs)
     | Deref ast -> Deref (aux env ast)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
@@ -1409,6 +1443,10 @@ let analyze asts =
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
         toplevel.exps_list := expname :: !(toplevel.exps_list) ;
+        Nope
+    | OpenModuleDef modname ->
+        toplevel.opened_modulename :=
+          (modname ^ ".") :: !(toplevel.opened_modulename) ;
         Nope
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with

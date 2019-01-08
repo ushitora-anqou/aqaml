@@ -1606,3 +1606,21 @@ test (Printf.sprintf "abc%c" 'd') "abcd" ;
 test (Printf.sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i" ;
 test (Printf.ksprintf (fun str -> String.length str) "%s%s%d" "abc" "cde" 5) 7 ;
 test (Printf.ksprintf (fun str -> String.length str) "abc") 3
+
+open Printf
+
+;;
+test (sprintf "abc") "abc" ;
+test (sprintf "abc%d" 1) "abc1" ;
+test (sprintf "abc%d%d" 1 2) "abc12" ;
+test (sprintf "abc%d%d%d" 1 2 3) "abc123" ;
+test (sprintf "abc%d%d%d%d" 1 2 3 4) "abc1234" ;
+test (sprintf "abc%d%d%d%d%d" 1 2 3 4 5) "abc12345" ;
+test (sprintf "abc%d%d%d%d%d" 1 (-2) 3 4 5) "abc1-2345" ;
+test (sprintf "abc%s" "def") "abcdef" ;
+test (sprintf "abc%s%s" "def" "ghi") "abcdefghi" ;
+test (sprintf "abc%s%d%s" "def" 10 "ghi") "abcdef10ghi" ;
+test (sprintf "abc%c" 'd') "abcd" ;
+test (sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i" ;
+test (ksprintf (fun str -> String.length str) "%s%s%d" "abc" "cde" 5) 7 ;
+test (ksprintf (fun str -> String.length str) "abc") 3
