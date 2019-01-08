@@ -308,7 +308,7 @@ let tokenize program =
         | '*' -> (
             let i, ch = next_char i in
             match ch with
-            | ')' -> if depth == 1 then i else aux i (depth - 1)
+            | ')' -> if depth = 1 then i else aux i (depth - 1)
             | _ -> aux (i - 1) depth )
         | _ -> aux i depth
       in
@@ -562,10 +562,12 @@ let parse tokens =
     | _ -> false
   in
   let is_dot = function (Dot | DotLBracket) :: _ -> true | _ -> false in
-  let is_prefix tokens =
-    is_primary tokens || is_dot tokens
-    || match tokens with Exclam :: _ -> true | _ -> false
+  let is_prefix = function Exclam :: _ -> true | _ -> false in
+  let is_let = function
+    | (Function | Fun | Match | Try | Let) :: _ -> true
+    | _ -> false
   in
+  let is_if = function If :: _ -> true | _ -> false in
   let rec parse_primary = function
     | IntLiteral num :: tokens -> (tokens, IntValue num)
     | CharLiteral ch :: tokens -> (tokens, CharValue ch)
@@ -647,7 +649,7 @@ let parse tokens =
     | tokens -> parse_dot tokens
   and parse_funccall tokens =
     let rec aux tokens =
-      if is_prefix tokens then
+      if is_primary tokens || is_dot tokens || is_prefix tokens then
         let tokens, arg = parse_prefix tokens in
         let tokens, args = aux tokens in
         (tokens, arg :: args)
@@ -758,7 +760,10 @@ let parse tokens =
     let rec aux lhs tokens =
       match tokens with
       | Comma :: tokens ->
-          let tokens, rhs = parse_structural_equal tokens in
+          let tokens, rhs =
+            if is_let tokens || is_if tokens then parse_let tokens
+            else parse_structural_equal tokens
+          in
           aux (rhs :: lhs) tokens
       | _ -> (tokens, lhs)
     in

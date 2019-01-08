@@ -1078,6 +1078,7 @@ let str = "abcde fghi" in
 test str.[5] ' '
 
 (* from commit 7201ef6ac69c3fd93bd1e6dcb236c91276a8a75e *)
+(*
 type token = IntLiteral of int | Plus | Minus | Star | Slash
 
 exception EOF
@@ -1163,6 +1164,7 @@ let rec eval = function
 
 ;;
 test (eval (parse (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))) 10
+*)
 
 type ('a, 'b) hashmap = ('a * 'b) list
 
@@ -1624,3 +1626,387 @@ test (sprintf "abc%c" 'd') "abcd" ;
 test (sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i" ;
 test (ksprintf (fun str -> String.length str) "%s%s%d" "abc" "cde" 5) 7 ;
 test (ksprintf (fun str -> String.length str) "abc") 3
+
+type token =
+  | IntLiteral of int
+  | CharLiteral of char
+  | StringLiteral of string * string
+  | Plus
+  | Minus
+  | Star
+  | Slash
+  | CapitalIdent of string
+  | LowerIdent of string
+  | CapitalIdentWithModule of string
+  | LowerIdentWithModule of string
+  | LParen
+  | RParen
+  | LRParen
+  | Let
+  | Equal
+  | In
+  | Rec
+  | If
+  | Then
+  | Else
+  | LT
+  | GT
+  | LTGT
+  | Comma
+  | LBracket
+  | RBracket
+  | LRBracket
+  | ColonColon
+  | Semicolon
+  | SemicolonSemicolon
+  | Match
+  | With
+  | Arrow
+  | Bar
+  | Fun
+  | Function
+  | As
+  | When
+  | Type
+  | Dot
+  | DotDot
+  | Of
+  | KwInt
+  | KwChar
+  | KwUnit
+  | KwBool
+  | KwString
+  | Apostrophe
+  | And
+  | Hat
+  | Naruto
+  | ColonEqual
+  | Exclam
+  | Try
+  | Exception
+  | Mod
+  | Lsl
+  | Lsr
+  | Asr
+  | DotLBracket
+  | Colon
+  | LBrace
+  | RBrace
+  | Module
+  | Struct
+  | End
+  | NarutoNaruto
+  | External
+  | LArrow
+  | Mutable
+  | Open
+
+let string_of_token = function
+  | IntLiteral num -> string_of_int num
+  | CharLiteral ch -> "'" ^ String.make 1 ch ^ "'"
+  | StringLiteral (_, str) -> "\"" ^ str ^ "\""
+  | Plus -> "+"
+  | Minus -> "-"
+  | Star -> "*"
+  | Slash -> "/"
+  | CapitalIdent str
+   |LowerIdent str
+   |CapitalIdentWithModule str
+   |LowerIdentWithModule str ->
+      str
+  | LParen -> "("
+  | RParen -> ")"
+  | LRParen -> "()"
+  | Let -> "let"
+  | Equal -> "="
+  | In -> "in"
+  | Rec -> "rec"
+  | If -> "if"
+  | Then -> "then"
+  | Else -> "else"
+  | LT -> "<"
+  | GT -> ">"
+  | LTGT -> "<>"
+  | Comma -> ","
+  | LBracket -> "["
+  | RBracket -> "]"
+  | LRBracket -> "[]"
+  | ColonColon -> "::"
+  | Semicolon -> ";"
+  | SemicolonSemicolon -> ";;"
+  | Match -> "match"
+  | With -> "with"
+  | Arrow -> "->"
+  | Bar -> "|"
+  | Fun -> "fun"
+  | Function -> "function"
+  | As -> "as"
+  | When -> "when"
+  | Type -> "type"
+  | Dot -> "."
+  | DotDot -> ".."
+  | Of -> "of"
+  | KwInt -> "int"
+  | KwChar -> "char"
+  | KwUnit -> "unit"
+  | KwBool -> "bool"
+  | KwString -> "string"
+  | Apostrophe -> "'"
+  | And -> "and"
+  | Hat -> "^"
+  | Naruto -> "@"
+  | ColonEqual -> ":="
+  | Exclam -> "!"
+  | Try -> "try"
+  | Exception -> "exception"
+  | Mod -> "mod"
+  | Lsl -> "lsl"
+  | Lsr -> "lsr"
+  | Asr -> "asr"
+  | DotLBracket -> ".["
+  | Colon -> ":"
+  | LBrace -> "{"
+  | RBrace -> "}"
+  | Module -> "module"
+  | Struct -> "struct"
+  | End -> "end"
+  | NarutoNaruto -> "@@"
+  | External -> "external"
+  | LArrow -> "<-"
+  | Mutable -> "mutable"
+  | Open -> "open"
+
+exception EOF
+
+let is_capital = function 'A' .. 'Z' -> true | _ -> false
+
+let tokenize program =
+  let rec aux i =
+    let next_char i =
+      if i < String.length program then (i + 1, program.[i]) else raise EOF
+    in
+    let rec next_int i acc =
+      try
+        let i, ch = next_char i in
+        match ch with
+        | '0' .. '9' -> next_int i ((acc * 10) + digit ch)
+        | _ -> (i - 1, acc)
+      with EOF -> (i, acc)
+    in
+    let next_ident i =
+      let buf = Buffer.create 5 in
+      let rec aux i =
+        try
+          let i, ch = next_char i in
+          match ch with
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' ->
+              Buffer.add_char buf ch ; aux i
+          | _ -> (i - 1, Buffer.contents buf)
+        with EOF -> (i, Buffer.contents buf)
+      in
+      aux i
+    in
+    let next_char_literal i =
+      let i, ch = next_char i in
+      match ch with
+      | '\\' -> (
+          let i, ch = next_char i in
+          ( i + 1
+          , match ch with
+            | 'n' -> '\n'
+            | 't' -> '\t'
+            | '\\' -> '\\'
+            | '"' -> '"'
+            | '\'' -> '\''
+            | _ -> failwith "unexpected char in char literal" ) )
+      | ch -> (i + 1, ch)
+    in
+    let next_string_literal i =
+      let buf = Buffer.create 16 in
+      let rec aux i =
+        let i, ch = next_char i in
+        match ch with
+        | '"' -> (i, Buffer.contents buf)
+        | '\\' -> (
+            let i, ch = next_char i in
+            match ch with
+            | 'n' -> Buffer.add_char buf '\n' ; aux i
+            | 't' -> Buffer.add_char buf '\t' ; aux i
+            | '\\' -> Buffer.add_char buf '\\' ; aux i
+            | '"' -> Buffer.add_char buf '"' ; aux i
+            | ch ->
+                Buffer.add_char buf '\\' ;
+                aux (i - 1) )
+        | _ -> Buffer.add_char buf ch ; aux i
+      in
+      aux i
+    in
+    let skip_comment i =
+      let rec aux i depth =
+        let i, ch = next_char i in
+        match ch with
+        | '(' -> (
+            let i, ch = next_char i in
+            match ch with '*' -> aux i (depth + 1) | _ -> aux (i - 1) depth )
+        | '*' -> (
+            let i, ch = next_char i in
+            match ch with
+            | ')' -> if depth = 1 then i else aux i (depth - 1)
+            | _ -> aux (i - 1) depth )
+        | _ -> aux i depth
+      in
+      aux i 1
+    in
+    try
+      let i, ch = next_char i in
+      match ch with
+      | ' ' | '\t' | '\n' | '\r' -> aux i
+      | '0' .. '9' ->
+          let i, num = next_int (i - 1) 0 in
+          IntLiteral num :: aux i
+      | '\'' -> (
+          let _, ch0 = next_char i in
+          let _, ch1 = next_char (i + 1) in
+          match (ch0, ch1) with
+          | _, '\'' | '\\', _ ->
+              let i, ch = next_char_literal i in
+              CharLiteral ch :: aux i
+          | _ -> Apostrophe :: aux i )
+      | '"' ->
+          let i, str = next_string_literal i in
+          StringLiteral ("string", str) :: aux i
+      | 'a' .. 'z' | 'A' .. 'Z' | '_' -> (
+          let i, str = next_ident (i - 1) in
+          match str with
+          | "let" -> Let :: aux i
+          | "in" -> In :: aux i
+          | "rec" -> Rec :: aux i
+          | "true" -> IntLiteral 1 :: aux i (* TODO: boolean type *)
+          | "false" -> IntLiteral 0 :: aux i
+          | "if" -> If :: aux i
+          | "then" -> Then :: aux i
+          | "else" -> Else :: aux i
+          | "match" -> Match :: aux i
+          | "with" -> With :: aux i
+          | "fun" -> Fun :: aux i
+          | "function" -> Function :: aux i
+          | "as" -> As :: aux i
+          | "when" -> When :: aux i
+          | "type" -> Type :: aux i
+          | "of" -> Of :: aux i
+          | "int" -> KwInt :: aux i
+          | "char" -> KwChar :: aux i
+          | "unit" -> KwUnit :: aux i
+          | "bool" -> KwBool :: aux i
+          | "string" -> KwString :: aux i
+          | "and" -> And :: aux i
+          | "try" -> Try :: aux i
+          | "exception" -> Exception :: aux i
+          | "mod" -> Mod :: aux i
+          | "lsl" -> Lsl :: aux i
+          | "lsr" -> Lsr :: aux i
+          | "asr" -> Asr :: aux i
+          | "module" -> Module :: aux i
+          | "struct" -> Struct :: aux i
+          | "end" -> End :: aux i
+          | "external" -> External :: aux i
+          | "mutable" -> Mutable :: aux i
+          | "open" -> Open :: aux i
+          | _ when is_capital str.[0] ->
+              let rec aux' i cap acc =
+                let i, ch = next_char i in
+                match ch with
+                | '.' ->
+                    let i, str = next_ident i in
+                    aux' i (is_capital str.[0]) (str :: acc)
+                | _ -> (
+                    let str = String.concat "." @@ List.rev acc in
+                    ( i - 1
+                    , match (cap, List.length acc > 1) with
+                      | false, false -> LowerIdent str
+                      | false, true -> LowerIdentWithModule str
+                      | true, false -> CapitalIdent str
+                      | true, true -> CapitalIdentWithModule str ) )
+              in
+              let i, tk = aux' i true [str] in
+              tk :: aux i
+          | _ -> LowerIdent str :: aux i )
+      | '+' -> Plus :: aux i
+      | '*' -> Star :: aux i
+      | '/' -> Slash :: aux i
+      | ')' -> RParen :: aux i
+      | '>' -> GT :: aux i
+      | '=' -> Equal :: aux i
+      | ',' -> Comma :: aux i
+      | ']' -> RBracket :: aux i
+      | '|' -> Bar :: aux i
+      | '^' -> Hat :: aux i
+      | '!' -> Exclam :: aux i
+      | '{' -> LBrace :: aux i
+      | '}' -> RBrace :: aux i
+      | '@' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '@' -> NarutoNaruto :: aux i
+          | _ -> Naruto :: aux (i - 1) )
+      | '.' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '.' -> DotDot :: aux i
+          | '[' -> DotLBracket :: aux i
+          | _ -> Dot :: aux (i - 1) )
+      | '-' -> (
+          let i, ch = next_char i in
+          match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
+      | '<' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '>' -> LTGT :: aux i
+          | '-' -> LArrow :: aux i
+          | _ -> LT :: aux (i - 1) )
+      | '[' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ']' -> LRBracket :: aux i
+          | _ -> LBracket :: aux (i - 1) )
+      | ':' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ':' -> ColonColon :: aux i
+          | '=' -> ColonEqual :: aux i
+          | _ -> Colon :: aux (i - 1) )
+      | ';' -> (
+          let i, ch = next_char i in
+          match ch with
+          | ';' -> SemicolonSemicolon :: aux i
+          | _ -> Semicolon :: aux (i - 1) )
+      | '(' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '*' ->
+              let i = skip_comment i in
+              aux i
+          | ')' -> LRParen :: aux i
+          | _ -> LParen :: aux (i - 1) )
+      | _ -> failwith (sprintf "unexpected char: '%c'" ch)
+    with EOF -> []
+  in
+  aux 0
+
+;;
+let string_of_tokens tokens =
+  let buf = Buffer.create 64 in
+  let rec aux = function
+    | x :: xs ->
+        Buffer.add_string buf @@ string_of_token x ;
+        aux xs
+    | _ -> Buffer.contents buf
+  in
+  aux tokens
+in
+test
+  (string_of_tokens (tokenize "4 / 2 * 3 + 1 - 10 / 2 + 4 * 2 * 1"))
+  "4/2*3+1-10/2+4*2*1" ;
+test
+  (string_of_tokens (tokenize "let f x y = x + y in f 2 3 * 4"))
+  "letfxy=x+yinf23*4"
