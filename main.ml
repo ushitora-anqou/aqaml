@@ -1,5 +1,4 @@
 open Printf
-open Scanf
 module HashMap = Map.Make (String)
 
 let filter_after_map f lst =
