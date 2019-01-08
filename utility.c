@@ -395,3 +395,86 @@ uint64_t aqaml_printf_sprintf_detail(uint64_t fmt_src)
 
     return ret_src;
 }
+
+uint64_t aqaml_call_func1(uint64_t, uint64_t);
+uint64_t aqaml_call_func2(uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func3(uint64_t, uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func4(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func5(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                          uint64_t);
+uint64_t aqaml_call_func6(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                          uint64_t, uint64_t);
+uint64_t aqaml_call_func7(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                          uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func8(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                          uint64_t, uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func9(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                          uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+uint64_t aqaml_call_func10(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                           uint64_t);
+
+uint64_t aqaml_appcls_detail(uint64_t nargs, uint64_t cls_src, uint64_t *args)
+{
+    while (1) {
+        AQamlValue cls = get_value(cls_src);
+        assert(cls.kind == AQAML_ARRAY);
+
+        uint64_t func_ptr = cls.array->data[0], cls_nargs = cls.array->data[1],
+                 cls_data = (uint64_t)(cls.array->data + 2), ret;
+        switch (cls_nargs) {
+        case 0:
+            ret = aqaml_call_func1(func_ptr, cls_data);
+            break;
+        case 1:
+            ret = aqaml_call_func2(func_ptr, args[0], cls_data);
+            args += 1;
+            break;
+        case 2:
+            ret = aqaml_call_func3(func_ptr, args[0], args[1], cls_data);
+            args += 2;
+            break;
+        case 3:
+            ret =
+                aqaml_call_func4(func_ptr, args[0], args[1], args[2], cls_data);
+            args += 3;
+            break;
+        case 4:
+            ret = aqaml_call_func5(func_ptr, args[0], args[1], args[2], args[3],
+                                   cls_data);
+            args += 4;
+            break;
+        case 5:
+            ret = aqaml_call_func6(func_ptr, args[0], args[1], args[2], args[3],
+                                   args[4], cls_data);
+            args += 5;
+            break;
+        case 6:
+            ret = aqaml_call_func7(func_ptr, args[0], args[1], args[2], args[3],
+                                   args[4], args[5], cls_data);
+            args += 6;
+            break;
+        case 7:
+            ret = aqaml_call_func8(func_ptr, args[0], args[1], args[2], args[3],
+                                   args[4], args[5], args[6], cls_data);
+            args += 7;
+            break;
+        case 8:
+            ret =
+                aqaml_call_func9(func_ptr, args[0], args[1], args[2], args[3],
+                                 args[4], args[5], args[6], args[7], cls_data);
+            args += 8;
+            break;
+        case 9:
+            ret = aqaml_call_func10(func_ptr, args[0], args[1], args[2],
+                                    args[3], args[4], args[5], args[6], args[7],
+                                    args[8], cls_data);
+            args += 9;
+            break;
+        }
+        nargs -= cls_nargs;
+        // TODO: curry
+        if (nargs == 0) return ret;
+        cls_src = ret;
+    }
+}

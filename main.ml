@@ -2246,7 +2246,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
         appstr buf "pop rax" ;
-        appfmt buf "call aqaml_appcls%d@PLT" @@ List.length args ;
+        appfmt buf "call aqaml_appcls%d" @@ List.length args ;
         appstr buf "push rax" ;
         Buffer.contents buf
     | LetAndAnalyzed (lets, rhs_of_in) ->
@@ -2509,37 +2509,36 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_raise:" ;
     appstr buf @@ gen_raise () ;
     appstr buf "" ;
+    for nargs = 1 to 10 do
+      appfmt buf ".global aqaml_call_func%d" nargs ;
+      appfmt buf "aqaml_call_func%d:" nargs ;
+      appstr buf "mov r10, rdi" ;
+      if nargs >= 1 then appstr buf "mov rax, rsi" ;
+      if nargs >= 2 then appstr buf "mov rbx, rdx" ;
+      if nargs >= 3 then appstr buf "mov rdi, rcx" ;
+      if nargs >= 4 then appstr buf "mov rsi, r8" ;
+      if nargs >= 5 then appstr buf "mov rdx, r9" ;
+      if nargs >= 6 then appstr buf "mov rcx, [rsp + 8]" ;
+      if nargs >= 7 then appstr buf "mov r8, [rsp + 16]" ;
+      if nargs >= 8 then appstr buf "mov r9, [rsp + 24]" ;
+      if nargs >= 9 then appstr buf "mov r12, [rsp + 32]" ;
+      if nargs >= 10 then appstr buf "mov r13, [rsp + 40]" ;
+      appstr buf "jmp r10" ;
+      appstr buf ""
+    done ;
     (* emit aqaml_appcls%d *)
     for nargs = 1 to 9 do
-      let label_loop = make_label () in
-      let label_exit = make_label () in
-      let label_ret = make_label () in
       appfmt buf "aqaml_appcls%d:" nargs ;
       appstr buf "push rbp" ;
       appstr buf "mov rbp, rsp" ;
-      appstr buf "sub rsp, 16" ;
-      for i = nargs downto 1 do
-        appfmt buf "push %s" @@ reg_of_index i
+      appfmt buf "sub rsp, %d" (nargs * 8) ;
+      for i = nargs - 1 downto 0 do
+        appfmt buf "mov [rsp + %d], %s" (i * 8) @@ reg_of_index (i + 1)
       done ;
-      appfmt buf "mov QWORD PTR [rbp - 8], %d" nargs ;
-      appfmt buf "%s:" label_loop ;
-      appstr buf "mov r10, rax" ;
-      appstr buf "mov r11, [rax + 8]" ;
-      appstr buf "sub [rbp - 8], r11" ;
-      appstr buf "lea rax, [r10 + 16]" ;
-      for i = 0 to nargs - 1 do
-        appstr buf "cmp r11, 0" ;
-        appfmt buf "je %s" label_exit ;
-        appstr buf "dec r11" ;
-        appfmt buf "pop %s" @@ reg_of_index i ;
-        appfmt buf "lea %s, [r10 + 16]" @@ reg_of_index (i + 1)
-      done ;
-      appfmt buf "%s:" label_exit ;
-      appstr buf "call [r10]" ;
-      appstr buf "cmp QWORD PTR [rbp - 8], 0" ;
-      appfmt buf "je %s" label_ret ;
-      appfmt buf "jmp %s" label_loop ;
-      appfmt buf "%s:" label_ret ;
+      appstr buf "mov rdx, rsp" ;
+      appstr buf "mov rsi, rax" ;
+      appfmt buf "mov rdi, %d" nargs ;
+      appstr buf "call aqaml_appcls_detail@PLT" ;
       appstr buf "mov rsp, rbp" ;
       appstr buf "pop rbp" ;
       appstr buf "ret" ;
