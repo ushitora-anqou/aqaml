@@ -52,6 +52,7 @@ let escape_string str =
     if i < String.length str then (
       ( match str.[i] with
       | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
       | '\t' -> Buffer.add_string buf "\\t"
       | '\\' -> Buffer.add_string buf "\\\\"
       | '"' -> Buffer.add_string buf "\\\""
@@ -147,8 +148,6 @@ type token =
   | Mutable
   | Open
 
-exception Unexpected_token
-
 let string_of_token = function
   | IntLiteral num -> string_of_int num
   | CharLiteral ch -> "'" ^ String.make 1 ch ^ "'"
@@ -224,6 +223,10 @@ let string_of_token = function
   | Mutable -> "mutable"
   | Open -> "open"
 
+let raise_unexpected_token = function
+  | x :: _ -> raise @@ failwith @@ string_of_token x
+  | [] -> failwith "Unexpected EOF"
+
 let rec eprint_token_list = function
   | token :: tokens ->
       eprintf "%s " (string_of_token token) ;
@@ -266,11 +269,13 @@ let tokenize program =
           ( i + 1
           , match ch with
             | 'n' -> '\n'
+            | 'r' -> '\r'
             | 't' -> '\t'
             | '\\' -> '\\'
             | '"' -> '"'
             | '\'' -> '\''
-            | _ -> failwith "unexpected char in char literal" ) )
+            | _ -> failwith @@ sprintf "unexpected char in char literal: %c" ch
+          ) )
       | ch -> (i + 1, ch)
     in
     let next_string_literal i =
@@ -576,7 +581,7 @@ let parse tokens =
         let tokens, ast = parse_expression tokens in
         match tokens with
         | RParen :: tokens -> (tokens, ast)
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | LBracket :: tokens ->
         let rec aux = function
           | Semicolon :: tokens ->
@@ -584,7 +589,7 @@ let parse tokens =
               let tokens, cdr = aux tokens in
               (tokens, Cons (car, cdr))
           | RBracket :: tokens -> (tokens, EmptyList)
-          | _ -> raise Unexpected_token
+          | x -> raise_unexpected_token x
         in
         let tokens, car = parse_let tokens in
         let tokens, cdr = aux tokens in
@@ -599,7 +604,7 @@ let parse tokens =
               let tokens, ast = parse_let tokens in
               aux ((fieldname, ast) :: fields) tokens
           | RBrace :: tokens -> (tokens, fields)
-          | _ -> raise Unexpected_token
+          | x -> raise_unexpected_token x
         in
         let tokens, ast = parse_let tokens in
         let tokens, fields = aux [(fieldname, ast)] tokens in
@@ -617,13 +622,13 @@ let parse tokens =
                   let tokens, ast = parse_let tokens in
                   aux ((fieldname, ast) :: fields) tokens
               | RBrace :: tokens -> (tokens, fields)
-              | _ -> raise Unexpected_token
+              | x -> raise_unexpected_token x
             in
             let tokens, ast = parse_let tokens in
             let tokens, fields = aux [(fieldname, ast)] tokens in
             (tokens, RecordValueWith (base, fields))
-        | _ -> raise Unexpected_token )
-    | _ -> raise Unexpected_token
+        | x -> raise_unexpected_token x )
+    | x -> raise_unexpected_token x
   and parse_dot tokens =
     let tokens, lhs = parse_primary tokens in
     match tokens with
@@ -633,7 +638,7 @@ let parse tokens =
         let tokens, rhs = parse_expression tokens in
         match tokens with
         | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | _ -> (tokens, lhs)
   and parse_prefix = function
     | Exclam :: tokens ->
@@ -760,7 +765,7 @@ let parse tokens =
     let tokens, ast = parse_structural_equal tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
-    | [] -> raise Unexpected_token
+    | [] -> raise_unexpected_token []
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_assignment tokens =
@@ -775,7 +780,7 @@ let parse tokens =
         | StringGet (str, idx) -> (tokens, StringSet (str, idx, rhs))
         | RecordDotAccess (None, lhs, fieldname) ->
             (tokens, RecordAssign (None, lhs, fieldname, rhs))
-        | _ -> raise Unexpected_token )
+        | _ -> raise_unexpected_token tokens )
     | _ -> (tokens, lhs)
   and parse_if = function
     | If :: tokens -> (
@@ -788,7 +793,7 @@ let parse tokens =
                 let tokens, else_body = parse_let tokens in
                 (tokens, IfThenElse (cond, then_body, Some else_body))
             | _ -> (tokens, IfThenElse (cond, then_body, None)) )
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | tokens -> parse_assignment tokens
   and parse_pattern_match tokens =
     let rec aux first cases tokens =
@@ -806,7 +811,7 @@ let parse tokens =
             let tokens, case = parse_expression tokens in
             let tokens, cases = aux false ((ptn, whn, case) :: cases) tokens in
             (tokens, cases)
-        | _ -> raise Unexpected_token
+        | x -> raise_unexpected_token x
       in
       match tokens with
       | Bar :: tokens -> aux' tokens
@@ -835,14 +840,14 @@ let parse tokens =
         | With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, MatchWith (cond, cases))
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | Try :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
         | With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, TryWith (cond, cases))
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | Let :: tokens -> (
         let parse_let_binding tokens =
           let tokens, bind = parse_pattern tokens in
@@ -909,7 +914,7 @@ let parse tokens =
         let tokens, ast = parse_pattern tokens in
         match tokens with
         | RParen :: tokens -> (tokens, ast)
-        | _ -> raise Unexpected_token )
+        | x -> raise_unexpected_token x )
     | LBracket :: tokens ->
         let rec aux = function
           | Semicolon :: tokens ->
@@ -917,12 +922,12 @@ let parse tokens =
               let tokens, cdr = aux tokens in
               (tokens, Cons (car, cdr))
           | RBracket :: tokens -> (tokens, EmptyList)
-          | _ -> raise Unexpected_token
+          | x -> raise_unexpected_token x
         in
         let tokens, car = parse_pattern tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
-    | _ -> raise Unexpected_token
+    | x -> raise_unexpected_token x
   and parse_pattern_range = function
     | CharLiteral st :: DotDot :: CharLiteral ed :: tokens ->
         (tokens, PtnRange (st, ed))
@@ -952,7 +957,7 @@ let parse tokens =
     let tokens, ast = parse_pattern_cons tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
-    | [] -> raise Unexpected_token
+    | [] -> raise_unexpected_token []
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_pattern_or tokens =
@@ -981,7 +986,7 @@ let parse tokens =
         (tokens, TyCustom typename)
     | LParen :: _ ->
         failwith "Any token LParen should be handled in parse_typexpr_ctor_app"
-    | _ -> raise Unexpected_token
+    | x -> raise_unexpected_token x
   and parse_typexpr_ctor_app tokens =
     let tokens, lhs =
       match tokens with
@@ -992,7 +997,7 @@ let parse tokens =
                 let tokens, typexpr = parse_typexpr tokens in
                 aux (typexpr :: types) tokens
             | RParen :: tokens -> (tokens, types)
-            | _ -> raise Unexpected_token
+            | x -> raise_unexpected_token x
           in
           let tokens, types = aux [typexpr] tokens in
           let types = List.rev types in
@@ -1017,7 +1022,7 @@ let parse tokens =
     let tokens, typexpr = parse_typexpr_ctor_app tokens in
     let tokens, typexprs = aux [typexpr] tokens in
     match typexprs with
-    | [] -> raise Unexpected_token
+    | [] -> raise_unexpected_token []
     | [typexpr] -> (tokens, typexpr)
     | typexprs -> (tokens, TyTuple typexprs)
   and parse_typexpr_func tokens =
@@ -1031,7 +1036,7 @@ let parse tokens =
   and parse_type_def tokens =
     let parse_type_param = function
       | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
-      | _ -> raise Unexpected_token
+      | x -> raise_unexpected_token x
     in
     let parse_type_params = function
       | LParen :: tokens ->
@@ -1040,7 +1045,7 @@ let parse tokens =
                 let tokens, type_param = parse_type_param tokens in
                 aux (type_param :: type_params) tokens
             | RParen :: tokens -> (tokens, TyTuple type_params)
-            | _ -> raise Unexpected_token
+            | x -> raise_unexpected_token x
           in
           let tokens, type_param = parse_type_param tokens in
           Some (aux [type_param] tokens)
@@ -1085,7 +1090,7 @@ let parse tokens =
                     let tokens, typexpr = parse_typexpr tokens in
                     aux ((fieldname, typexpr) :: fields) tokens
                 | RBrace :: tokens -> (tokens, fields)
-                | _ -> raise Unexpected_token
+                | x -> raise_unexpected_token x
               in
               let tokens, typexpr = parse_typexpr tokens in
               let tokens, fields = aux [(fieldname, typexpr)] tokens in
@@ -1093,7 +1098,7 @@ let parse tokens =
           | tokens ->
               let tokens, typ = parse_typexpr tokens in
               (tokens, DefTypeAlias (type_param, typename, typ)) )
-      | _ -> raise Unexpected_token
+      | x -> raise_unexpected_token x
     in
     let rec aux entries = function
       | And :: tokens ->
@@ -1110,7 +1115,7 @@ let parse tokens =
         let tokens, typ = parse_typexpr tokens in
         (tokens, ExpDef (expname, Some typ))
     | CapitalIdent expname :: tokens -> (tokens, ExpDef (expname, None))
-    | _ -> raise Unexpected_token
+    | x -> raise_unexpected_token x
   in
   let parse_expressions_and_definitions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
@@ -1134,7 +1139,7 @@ let parse tokens =
           | Equal :: StringLiteral (_, str) :: tokens ->
               let ast = ExternalDecl (id, typexpr, str) in
               aux (ast :: exprs) tokens
-          | _ -> raise Unexpected_token )
+          | x -> raise_unexpected_token x )
       | Open :: CapitalIdent modname :: tokens
        |Open :: CapitalIdentWithModule modname :: tokens ->
           aux (OpenModuleDef modname :: exprs) tokens
@@ -2606,11 +2611,13 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   main_code ^ letfuncs_code ^ strings_code
 
 ;;
-let program = read_lines () in
-let tokens = tokenize program in
-(* eprint_token_list tokens ; *)
-let asts = parse tokens in
-let analyzed_data = analyze asts in
-let code = generate analyzed_data in
-print_string
-  (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
+try
+  let program = read_lines () in
+  let tokens = tokenize program in
+  (* eprint_token_list tokens ; *)
+  let asts = parse tokens in
+  let analyzed_data = analyze asts in
+  let code = generate analyzed_data in
+  print_string
+    (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
+with Failure str -> eprintf "[AQaml Error] %s\n" @@ str
