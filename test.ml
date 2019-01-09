@@ -1240,7 +1240,8 @@ test (List.hd [-1; 0; 2]) (-1) ;
 test (try List.hd [] with Failure _ -> 1) 1 ;
 test (List.concat [[1]; [2; 3]; [4; 5; 6]]) [1; 2; 3; 4; 5; 6] ;
 test (List.flatten [[1]; [2; 3]; [4; 5; 6]]) [1; 2; 3; 4; 5; 6] ;
-test (List.filter (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5; 6; 7]) [2; 4; 6]
+test (List.filter (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5; 6; 7]) [2; 4; 6] ;
+test (List.find (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5]) 2
 
 module HashMap = struct
   type ('a, 'b) t = ('a * 'b) list

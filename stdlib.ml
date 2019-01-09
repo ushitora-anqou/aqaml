@@ -103,6 +103,10 @@ module List = struct
       | [] -> acc
     in
     List.rev (aux [] lst)
+
+  let rec find p = function
+    | x :: xs -> if p x then x else find p xs
+    | [] -> raise Not_found
 end
 
 module String = struct
