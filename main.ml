@@ -632,8 +632,13 @@ let parse tokens =
             (tokens, RecordValueWith (base, fields))
         | x -> raise_unexpected_token x )
     | x -> raise_unexpected_token x
+  and parse_prefix = function
+    | Exclam :: tokens ->
+        let tokens, ast = parse_primary tokens in
+        (tokens, Deref ast)
+    | tokens -> parse_primary tokens
   and parse_dot tokens =
-    let tokens, lhs = parse_primary tokens in
+    let tokens, lhs = parse_prefix tokens in
     match tokens with
     | Dot :: LowerIdent fieldname :: tokens ->
         (tokens, RecordDotAccess (None, lhs, fieldname))
@@ -643,20 +648,15 @@ let parse tokens =
         | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
         | x -> raise_unexpected_token x )
     | _ -> (tokens, lhs)
-  and parse_prefix = function
-    | Exclam :: tokens ->
-        let tokens, ast = parse_dot tokens in
-        (tokens, Deref ast)
-    | tokens -> parse_dot tokens
   and parse_funccall tokens =
     let rec aux tokens =
       if is_primary tokens || is_dot tokens || is_prefix tokens then
-        let tokens, arg = parse_prefix tokens in
+        let tokens, arg = parse_dot tokens in
         let tokens, args = aux tokens in
         (tokens, arg :: args)
       else (tokens, [])
     in
-    let tokens, func = parse_prefix tokens in
+    let tokens, func = parse_dot tokens in
     let tokens, args = aux tokens in
     if args = [] then (tokens, func) (* not function call *)
     else (tokens, AppCls (func, args))
