@@ -22,6 +22,12 @@ let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let is_lower = function 'a' .. 'z' -> true | _ -> false
 
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let is_ident_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' -> true
+  | _ -> false
+
 let append_to_list_ref x xs = xs := x :: !xs
 
 let string_of_list src = "[" ^ String.concat "; " src ^ "]"
@@ -149,6 +155,7 @@ type token =
   | Open
   | BarBar
   | AndAnd
+  | Ampersand
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -226,6 +233,7 @@ let string_of_token = function
   | Open -> "open"
   | BarBar -> "||"
   | AndAnd -> "&&"
+  | Ampersand -> "&"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -235,7 +243,7 @@ let raise_unexpected_token = function
 exception EOF
 
 let tokenize program =
-  let rec aux i =
+  let rec aux acc i =
     let next_char i =
       if i < String.length program then (i + 1, program.[i]) else raise EOF
     in
@@ -246,23 +254,18 @@ let tokenize program =
       with EOF -> (i + 1, None)
     in
     let rec next_int i acc =
-      try
-        let i, ch = next_char i in
-        match ch with
-        | '0' .. '9' -> next_int i ((acc * 10) + digit ch)
-        | _ -> (i - 1, acc)
-      with EOF -> (i, acc)
+      match maybe_next_char i with
+      | _, None -> (i, acc)
+      | i, Some ch when is_digit ch -> next_int i ((acc * 10) + digit ch)
+      | i, Some _ -> (i - 1, acc)
     in
     let next_ident i =
       let buf = Buffer.create 5 in
       let rec aux i =
-        try
-          let i, ch = next_char i in
-          match ch with
-          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' ->
-              Buffer.add_char buf ch ; aux i
-          | _ -> (i - 1, Buffer.contents buf)
-        with EOF -> (i, Buffer.contents buf)
+        match maybe_next_char i with
+        | _, None -> (i, Buffer.contents buf)
+        | i, Some ch when is_ident_char ch -> Buffer.add_char buf ch ; aux i
+        | i, Some _ -> (i - 1, Buffer.contents buf)
       in
       aux i
     in
@@ -328,69 +331,81 @@ let tokenize program =
       in
       aux i 1
     in
-    try
-      let i, ch = next_char i in
+    let switch_char i default tbl =
+      match maybe_next_char i with
+      | _, None -> aux (default :: acc) i
+      | i, Some ch ->
+          let i, token =
+            try
+              let _, token = List.find (fun (x, _) -> x = ch) tbl in
+              (i, token)
+            with Not_found -> (i - 1, default)
+          in
+          aux (token :: acc) i
+    in
+    match maybe_next_char i with
+    | _, None -> List.rev acc
+    | i, Some ch -> (
       match ch with
-      | ' ' | '\t' | '\n' | '\r' -> aux i
+      | ' ' | '\t' | '\n' | '\r' -> aux acc i
       | '0' .. '9' ->
           let i, num = next_int (i - 1) 0 in
-          IntLiteral num :: aux i
+          aux (IntLiteral num :: acc) i
       | '\'' -> (
           let _, ch0 = next_char i in
           let _, ch1 = next_char (i + 1) in
           match (ch0, ch1) with
           | _, '\'' | '\\', _ ->
               let i, ch = next_char_literal i in
-              CharLiteral ch :: aux i
-          | _ -> Apostrophe :: aux i )
+              aux (CharLiteral ch :: acc) i
+          | _ -> aux (Apostrophe :: acc) i )
       | '"' ->
           let i, str = next_string_literal i in
-          StringLiteral (make_id "string", str) :: aux i
+          aux (StringLiteral (make_id "string", str) :: acc) i
       | 'a' .. 'z' | 'A' .. 'Z' | '_' -> (
           let i, str = next_ident (i - 1) in
           match str with
-          | "let" -> Let :: aux i
-          | "in" -> In :: aux i
-          | "rec" -> Rec :: aux i
-          | "true" -> IntLiteral 1 :: aux i (* TODO: boolean type *)
-          | "false" -> IntLiteral 0 :: aux i
-          | "if" -> If :: aux i
-          | "then" -> Then :: aux i
-          | "else" -> Else :: aux i
-          | "match" -> Match :: aux i
-          | "with" -> With :: aux i
-          | "fun" -> Fun :: aux i
-          | "function" -> Function :: aux i
-          | "as" -> As :: aux i
-          | "when" -> When :: aux i
-          | "type" -> Type :: aux i
-          | "of" -> Of :: aux i
-          | "int" -> KwInt :: aux i
-          | "char" -> KwChar :: aux i
-          | "unit" -> KwUnit :: aux i
-          | "bool" -> KwBool :: aux i
-          | "string" -> KwString :: aux i
-          | "and" -> And :: aux i
-          | "try" -> Try :: aux i
-          | "exception" -> Exception :: aux i
-          | "mod" -> Mod :: aux i
-          | "lsl" -> Lsl :: aux i
-          | "lsr" -> Lsr :: aux i
-          | "asr" -> Asr :: aux i
-          | "module" -> Module :: aux i
-          | "struct" -> Struct :: aux i
-          | "end" -> End :: aux i
-          | "external" -> External :: aux i
-          | "mutable" -> Mutable :: aux i
-          | "open" -> Open :: aux i
+          | "let" -> aux (Let :: acc) i
+          | "in" -> aux (In :: acc) i
+          | "rec" -> aux (Rec :: acc) i
+          | "true" -> aux (IntLiteral 1 :: acc) i (* TODO: boolean type *)
+          | "false" -> aux (IntLiteral 0 :: acc) i
+          | "if" -> aux (If :: acc) i
+          | "then" -> aux (Then :: acc) i
+          | "else" -> aux (Else :: acc) i
+          | "match" -> aux (Match :: acc) i
+          | "with" -> aux (With :: acc) i
+          | "fun" -> aux (Fun :: acc) i
+          | "function" -> aux (Function :: acc) i
+          | "as" -> aux (As :: acc) i
+          | "when" -> aux (When :: acc) i
+          | "type" -> aux (Type :: acc) i
+          | "of" -> aux (Of :: acc) i
+          | "int" -> aux (KwInt :: acc) i
+          | "char" -> aux (KwChar :: acc) i
+          | "unit" -> aux (KwUnit :: acc) i
+          | "bool" -> aux (KwBool :: acc) i
+          | "string" -> aux (KwString :: acc) i
+          | "and" -> aux (And :: acc) i
+          | "try" -> aux (Try :: acc) i
+          | "exception" -> aux (Exception :: acc) i
+          | "mod" -> aux (Mod :: acc) i
+          | "lsl" -> aux (Lsl :: acc) i
+          | "lsr" -> aux (Lsr :: acc) i
+          | "asr" -> aux (Asr :: acc) i
+          | "module" -> aux (Module :: acc) i
+          | "struct" -> aux (Struct :: acc) i
+          | "end" -> aux (End :: acc) i
+          | "external" -> aux (External :: acc) i
+          | "mutable" -> aux (Mutable :: acc) i
+          | "open" -> aux (Open :: acc) i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
-                let i, ch = maybe_next_char i in
-                match ch with
-                | Some '.' ->
+                match maybe_next_char i with
+                | i, Some '.' ->
                     let i, str = next_ident i in
                     aux' i (is_capital str.[0]) (str :: acc)
-                | _ -> (
+                | i, _ -> (
                     let str = String.concat "." @@ List.rev acc in
                     ( i - 1
                     , match (cap, List.length acc > 1) with
@@ -400,76 +415,39 @@ let tokenize program =
                       | true, true -> CapitalIdentWithModule str ) )
               in
               let i, tk = aux' i true [str] in
-              tk :: aux i
-          | _ -> LowerIdent str :: aux i )
-      | '+' -> Plus :: aux i
-      | '*' -> Star :: aux i
-      | '/' -> Slash :: aux i
-      | ')' -> RParen :: aux i
-      | '>' -> GT :: aux i
-      | '=' -> Equal :: aux i
-      | ',' -> Comma :: aux i
-      | ']' -> RBracket :: aux i
-      | '^' -> Hat :: aux i
-      | '!' -> Exclam :: aux i
-      | '{' -> LBrace :: aux i
-      | '}' -> RBrace :: aux i
-      | '|' -> (
-          let i, ch = next_char i in
-          match ch with '|' -> BarBar :: aux i | _ -> Bar :: aux (i - 1) )
-      | '&' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '&' -> AndAnd :: aux i
-          | _ -> failwith "unexpected char" )
-      | '@' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '@' -> NarutoNaruto :: aux i
-          | _ -> Naruto :: aux (i - 1) )
-      | '.' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '.' -> DotDot :: aux i
-          | '[' -> DotLBracket :: aux i
-          | _ -> Dot :: aux (i - 1) )
-      | '-' -> (
-          let i, ch = next_char i in
-          match ch with '>' -> Arrow :: aux i | _ -> Minus :: aux (i - 1) )
-      | '<' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '>' -> LTGT :: aux i
-          | '-' -> LArrow :: aux i
-          | _ -> LT :: aux (i - 1) )
-      | '[' -> (
-          let i, ch = next_char i in
-          match ch with
-          | ']' -> LRBracket :: aux i
-          | _ -> LBracket :: aux (i - 1) )
-      | ':' -> (
-          let i, ch = next_char i in
-          match ch with
-          | ':' -> ColonColon :: aux i
-          | '=' -> ColonEqual :: aux i
-          | _ -> Colon :: aux (i - 1) )
-      | ';' -> (
-          let i, ch = next_char i in
-          match ch with
-          | ';' -> SemicolonSemicolon :: aux i
-          | _ -> Semicolon :: aux (i - 1) )
+              aux (tk :: acc) i
+          | _ -> aux (LowerIdent str :: acc) i )
+      | '+' -> aux (Plus :: acc) i
+      | '*' -> aux (Star :: acc) i
+      | '/' -> aux (Slash :: acc) i
+      | ')' -> aux (RParen :: acc) i
+      | '>' -> aux (GT :: acc) i
+      | '=' -> aux (Equal :: acc) i
+      | ',' -> aux (Comma :: acc) i
+      | ']' -> aux (RBracket :: acc) i
+      | '^' -> aux (Hat :: acc) i
+      | '!' -> aux (Exclam :: acc) i
+      | '{' -> aux (LBrace :: acc) i
+      | '}' -> aux (RBrace :: acc) i
+      | '|' -> switch_char i Bar [('|', BarBar)]
+      | '&' -> switch_char i Ampersand [('&', AndAnd)]
+      | '@' -> switch_char i Naruto [('@', NarutoNaruto)]
+      | '.' -> switch_char i Dot [('.', DotDot); ('[', DotLBracket)]
+      | '-' -> switch_char i Minus [('>', Arrow)]
+      | '<' -> switch_char i LT [('>', LTGT); ('-', LArrow)]
+      | '[' -> switch_char i LBracket [(']', LRBracket)]
+      | ':' -> switch_char i Colon [(':', ColonColon); ('=', ColonEqual)]
+      | ';' -> switch_char i Semicolon [(';', SemicolonSemicolon)]
       | '(' -> (
-          let i, ch = next_char i in
-          match ch with
-          | '*' ->
-              let i = skip_comment i in
-              aux i
-          | ')' -> LRParen :: aux i
-          | _ -> LParen :: aux (i - 1) )
-      | _ -> failwith (sprintf "unexpected char: '%c'" ch)
-    with EOF -> []
+        match maybe_next_char i with
+        | i, Some '*' ->
+            let i = skip_comment i in
+            aux acc i
+        | i, Some ')' -> aux (LRParen :: acc) i
+        | _, (Some _ | None) -> aux (LParen :: acc) i )
+      | _ -> failwith (sprintf "unexpected char: '%c'" ch) )
   in
-  aux 0
+  aux [] 0
 
 type typ =
   | TyInt
