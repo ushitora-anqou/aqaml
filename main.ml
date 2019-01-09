@@ -147,6 +147,8 @@ type token =
   | LArrow
   | Mutable
   | Open
+  | BarBar
+  | AndAnd
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -222,6 +224,8 @@ let string_of_token = function
   | LArrow -> "<-"
   | Mutable -> "mutable"
   | Open -> "open"
+  | BarBar -> "||"
+  | AndAnd -> "&&"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -403,11 +407,18 @@ let tokenize program =
       | '=' -> Equal :: aux i
       | ',' -> Comma :: aux i
       | ']' -> RBracket :: aux i
-      | '|' -> Bar :: aux i
       | '^' -> Hat :: aux i
       | '!' -> Exclam :: aux i
       | '{' -> LBrace :: aux i
       | '}' -> RBrace :: aux i
+      | '|' -> (
+          let i, ch = next_char i in
+          match ch with '|' -> BarBar :: aux i | _ -> Bar :: aux (i - 1) )
+      | '&' -> (
+          let i, ch = next_char i in
+          match ch with
+          | '&' -> AndAnd :: aux i
+          | _ -> failwith "unexpected char" )
       | '@' -> (
           let i, ch = next_char i in
           match ch with
@@ -487,6 +498,8 @@ type ast =
   | LogicalLeftShift of ast * ast
   | LogicalRightShift of ast * ast
   | ArithmeticRightShift of ast * ast
+  | LogicalAnd of ast * ast
+  | LogicalOr of ast * ast
   | StringConcat of ast * ast
   | ListConcat of ast * ast
   | Negate of ast
@@ -763,18 +776,36 @@ let parse tokens =
     in
     let tokens, ast = parse_string_concat tokens in
     aux ast tokens
+  and parse_logical_and tokens =
+    let rec aux lhs = function
+      | AndAnd :: tokens ->
+          let tokens, rhs = parse_structural_equal tokens in
+          aux (LogicalAnd (lhs, rhs)) tokens
+      | tokens -> (tokens, lhs)
+    in
+    let tokens, ast = parse_structural_equal tokens in
+    aux ast tokens
+  and parse_logical_or tokens =
+    let rec aux lhs = function
+      | BarBar :: tokens ->
+          let tokens, rhs = parse_logical_and tokens in
+          aux (LogicalOr (lhs, rhs)) tokens
+      | tokens -> (tokens, lhs)
+    in
+    let tokens, ast = parse_logical_and tokens in
+    aux ast tokens
   and parse_tuple tokens =
     let rec aux lhs tokens =
       match tokens with
       | Comma :: tokens ->
           let tokens, rhs =
             if is_let tokens || is_if tokens then parse_let tokens
-            else parse_structural_equal tokens
+            else parse_logical_or tokens
           in
           aux (rhs :: lhs) tokens
       | _ -> (tokens, lhs)
     in
-    let tokens, ast = parse_structural_equal tokens in
+    let tokens, ast = parse_logical_or tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
     | [] -> raise_unexpected_token []
@@ -1380,6 +1411,8 @@ let analyze asts =
     | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
     | LessThan (lhs, rhs) -> LessThan (aux env lhs, aux env rhs)
     | LessThanEqual (lhs, rhs) -> LessThanEqual (aux env lhs, aux env rhs)
+    | LogicalAnd (lhs, rhs) -> LogicalAnd (aux env lhs, aux env rhs)
+    | LogicalOr (lhs, rhs) -> LogicalOr (aux env lhs, aux env rhs)
     | IfThenElse (cond, then_body, Some else_body) ->
         IfThenElse (aux env cond, aux env then_body, Some (aux env else_body))
     | IfThenElse (cond, then_body, None) ->
@@ -2236,6 +2269,42 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "movzx rax, al"
           ; tag_int "rax"
           ; "push rax" ]
+    | LogicalAnd (lhs, rhs) ->
+        let false_label = make_label () in
+        let exit_label = make_label () in
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
+        appfmt buf "je %s" false_label ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
+        appfmt buf "je %s" false_label ;
+        appfmt buf "push %d" @@ tagged_int 1 ;
+        appfmt buf "jmp %s" exit_label ;
+        appfmt buf "%s:" false_label ;
+        appfmt buf "push %d" @@ tagged_int 0 ;
+        appfmt buf "%s:" exit_label ;
+        Buffer.contents buf
+    | LogicalOr (lhs, rhs) ->
+        let true_label = make_label () in
+        let exit_label = make_label () in
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int 1 ;
+        appfmt buf "je %s" true_label ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp rax, %d" @@ tagged_int 1 ;
+        appfmt buf "je %s" true_label ;
+        appfmt buf "push %d" @@ tagged_int 0 ;
+        appfmt buf "jmp %s" exit_label ;
+        appfmt buf "%s:" true_label ;
+        appfmt buf "push %d" @@ tagged_int 1 ;
+        appfmt buf "%s:" exit_label ;
+        Buffer.contents buf
     | IfThenElse (cond, then_body, else_body) ->
         let false_label = make_label () in
         let exit_label = make_label () in

@@ -1627,6 +1627,28 @@ test (sprintf "abc%c%s%d%c" 'd' "efg" 10 'i') "abcdefg10i" ;
 test (ksprintf (fun str -> String.length str) "%s%s%d" "abc" "cde" 5) 7 ;
 test (ksprintf (fun str -> String.length str) "abc") 3
 
+;;
+test (false && false) false ;
+test (false && true) false ;
+test (true && false) false ;
+test (true && true) true ;
+test (false || false) false ;
+test (false || true) true ;
+test (true || false) true ;
+test (true || true) true
+
+;;
+let r = ref 10 in
+let f () = r := !r + 1 in
+false && (f () ; true) ;
+test !r 10 ;
+true || (f () ; true) ;
+test !r 10 ;
+true && (f () ; true) ;
+test !r 11 ;
+false || (f () ; true) ;
+test !r 12
+
 type token =
   | IntLiteral of int
   | CharLiteral of char
