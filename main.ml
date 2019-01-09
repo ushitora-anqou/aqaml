@@ -1294,7 +1294,8 @@ let analyze asts =
     | StringValue _ ->
         append_to_list_ref ptn toplevel.strings ;
         ptn
-    | TupleValue values -> TupleValue (List.map (aux_ptn env) values)
+    | TupleValue values ->
+        TupleValue (List.map (fun x -> aux_ptn env x) values)
     | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
     | Var name -> (
       match find_symbol env name with
@@ -1331,7 +1332,7 @@ let analyze asts =
     | StringValue _ ->
         append_to_list_ref ast toplevel.strings ;
         ast
-    | TupleValue values -> TupleValue (List.map (aux env) values)
+    | TupleValue values -> TupleValue (List.map (fun x -> aux env x) values)
     | RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
         let name_prefix, typename =
@@ -1398,7 +1399,7 @@ let analyze asts =
         IfThenElse (aux env cond, aux env then_body, Some (aux env else_body))
     | IfThenElse (cond, then_body, None) ->
         IfThenElse (aux env cond, aux env then_body, None)
-    | ExprSeq exprs -> ExprSeq (List.map (aux env) exprs)
+    | ExprSeq exprs -> ExprSeq (List.map (fun x -> aux env x) exprs)
     | Lambda (args, body) ->
         let funcname = ".lambda" in
         aux env
@@ -1498,7 +1499,7 @@ let analyze asts =
               failwith @@ sprintf "not found variable in analysis: %s" funcname
         with
         | FuncVar (gen_funcname, nargs) ->
-            let args = List.map (aux env) args in
+            let args = List.map (fun x -> aux env x) args in
             if List.length args = nargs then AppDir (gen_funcname, args)
             else
               let rec split n lst =
@@ -1512,11 +1513,13 @@ let analyze asts =
               in
               let head, tail = split nargs args in
               AppCls (AppDir (gen_funcname, head), tail)
-        | Var varname -> AppCls (aux env var, List.map (aux env) args)
+        | Var varname ->
+            AppCls (aux env var, List.map (fun x -> aux env x) args)
         | _ -> raise Not_found
       with Not_found ->
         failwith (sprintf "not found in analysis (AppCls): %s" funcname) )
-    | AppCls (func, args) -> AppCls (aux env func, List.map (aux env) args)
+    | AppCls (func, args) ->
+        AppCls (aux env func, List.map (fun x -> aux env x) args)
     | LetAnd (recursive, lhs_of_in, rhs_of_in) ->
         (* Split rhs_of_eq into LetVar and LetFunc. At the same time,
          * make a conversion table for function names *)
@@ -1659,7 +1662,7 @@ let analyze asts =
                     LetFunc
                       ( recursive
                       , gen_funcname
-                      , List.map (aux_ptn env_in) args
+                      , List.map (fun x -> aux_ptn env_in x) args
                       , func
                       , [] )
                   in
@@ -1676,7 +1679,7 @@ let analyze asts =
                     LetFunc
                       ( recursive
                       , gen_funcname
-                      , List.map (aux_ptn env_in) args
+                      , List.map (fun x -> aux_ptn env_in x) args
                       , func
                       , !freevars )
                   in
