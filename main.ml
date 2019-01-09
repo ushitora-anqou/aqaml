@@ -232,12 +232,6 @@ let raise_unexpected_token = function
       raise @@ failwith @@ sprintf "Unexpected token: %s" @@ string_of_token x
   | [] -> failwith "Unexpected EOF"
 
-let rec eprint_token_list = function
-  | token :: tokens ->
-      eprintf "%s " (string_of_token token) ;
-      eprint_token_list tokens
-  | [] -> ()
-
 exception EOF
 
 let tokenize program =
@@ -632,7 +626,7 @@ let parse tokens =
         let tokens, fields = aux [(fieldname, ast)] tokens in
         (tokens, RecordValue (None, fields))
     | LBrace :: tokens -> (
-        let tokens, base = parse_primary tokens in
+        let tokens, base = parse_prefix tokens in
         match tokens with
         | With
           :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
@@ -2690,6 +2684,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     Buffer.contents buf
   in
   main_code ^ letfuncs_code ^ strings_code
+
+let rec eprint_token_list = function
+  | token :: tokens ->
+      eprintf "%s " (string_of_token token) ;
+      eprint_token_list tokens
+  | [] -> ()
 
 ;;
 try
