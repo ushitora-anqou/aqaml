@@ -2010,3 +2010,109 @@ test
 test
   (string_of_tokens (tokenize "let f x y = x + y in f 2 3 * 4"))
   "letfxy=x+yinf23*4"
+
+type typ =
+  | TyInt
+  | TyChar
+  | TyUnit
+  | TyBool
+  | TyString
+  | TyTuple of typ list
+  | TyCustom of string
+  | TyVar of string
+  | TyCtorApp of typ * string
+  | TyArgs of typ list
+  | TyFunc of typ * typ
+
+type ast =
+  | UnitValue
+  | IntValue of int
+  | CharValue of char
+  | StringValue of string * string
+  | TupleValue of ast list
+  | RecordValue of string option * (string * ast) list
+  | RecordValueWith of ast * (string * ast) list
+  | RecordDotAccess of string option * ast * string
+  | Add of ast * ast
+  | Sub of ast * ast
+  | Mul of ast * ast
+  | Div of ast * ast
+  | Rem of ast * ast
+  | LogicalLeftShift of ast * ast
+  | LogicalRightShift of ast * ast
+  | ArithmeticRightShift of ast * ast
+  | StringConcat of ast * ast
+  | ListConcat of ast * ast
+  | Negate of ast
+  | Positate of ast
+  | StructEqual of (ast * ast)
+  | StructInequal of (ast * ast)
+  | LessThan of (ast * ast)
+  | LessThanEqual of (ast * ast)
+  | IfThenElse of (ast * ast * ast option)
+  | Var of string
+  | FuncVar of string * int
+  | AppCls of (ast * ast list)
+  | AppDir of (string * ast list)
+  | LetAnd of (bool * (pattern list * ast) list * ast option)
+  | LetVar of (bool * pattern * ast)
+  (* recursive?, funcname, args, function body, free variables *)
+  | LetFunc of (bool * string * pattern list * ast * string list)
+  | LetAndAnalyzed of ast list * ast
+  | Cons of (ast * ast)
+  | EmptyList
+  | ExprSeq of ast list
+  | MatchWith of ast * (pattern * ast option * ast) list
+  | MakeCls of string * int * string list
+  | Lambda of pattern list * ast
+  | TypeAnd of typedef list
+  | CtorApp of string option * string * ast option
+  | RefAssign of ast * ast
+  | RecordAssign of string option * ast * string * ast
+  | Deref of ast
+  | ExpDef of string * typ option
+  | TryWith of ast * (pattern * ast option * ast) list
+  | StringGet of ast * ast
+  | StringSet of ast * ast * ast
+  | Nope
+  | ModuleDef of string * ast list
+  (* for analysis *)
+  | ModuleDefEnd
+  | ExternalDecl of string * typ * string
+  | OpenModuleDef of string
+  (* TODO: module Ptn *)
+  | PtnOr of pattern * pattern
+  | PtnAlias of pattern * ast
+  | PtnRange of char * char
+
+and pattern = ast
+
+and typedef =
+  | DefVariant of typ option * string * (string * typ option) list
+  | DefTypeAlias of typ option * string * typ
+  | DefRecord of string * (string * typ) list
+
+exception Unexpected_ast
+
+let raise_unexpected_token = function
+  | x :: _ -> raise @@ failwith @@ string_of_token x
+  | [] -> failwith "Unexpected EOF"
+
+let rec varnames_in_pattern = function
+  (* TODO: much faster algorithm? *)
+  | UnitValue | IntValue _ | CharValue _ | StringValue _ | EmptyList
+   |PtnRange _ ->
+      []
+  | Var varname -> [varname]
+  | Cons (car, cdr) ->
+      List.rev_append (varnames_in_pattern car) (varnames_in_pattern cdr)
+  | TupleValue values ->
+      List.fold_left
+        (fun a b -> List.rev_append a (varnames_in_pattern b))
+        [] values
+  | CtorApp (_, _, None) -> []
+  | CtorApp (_, _, Some arg) -> varnames_in_pattern arg
+  | PtnOr (lhs, rhs) ->
+      List.rev_append (varnames_in_pattern lhs) (varnames_in_pattern rhs)
+  | PtnAlias (ptn, Var name) -> name :: varnames_in_pattern ptn
+  | _ -> raise Unexpected_ast

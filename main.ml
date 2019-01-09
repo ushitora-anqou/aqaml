@@ -224,7 +224,8 @@ let string_of_token = function
   | Open -> "open"
 
 let raise_unexpected_token = function
-  | x :: _ -> raise @@ failwith @@ string_of_token x
+  | x :: _ ->
+      raise @@ failwith @@ sprintf "Unexpected token: %s" @@ string_of_token x
   | [] -> failwith "Unexpected EOF"
 
 let rec eprint_token_list = function
@@ -239,6 +240,12 @@ let tokenize program =
   let rec aux i =
     let next_char i =
       if i < String.length program then (i + 1, program.[i]) else raise EOF
+    in
+    let maybe_next_char i =
+      try
+        let i, ch = next_char i in
+        (i, Some ch)
+      with EOF -> (i + 1, None)
     in
     let rec next_int i acc =
       try
@@ -371,9 +378,9 @@ let tokenize program =
           | "open" -> Open :: aux i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
-                let i, ch = next_char i in
+                let i, ch = maybe_next_char i in
                 match ch with
-                | '.' ->
+                | Some '.' ->
                     let i, str = next_ident i in
                     aux' i (is_capital str.[0]) (str :: acc)
                 | _ -> (
