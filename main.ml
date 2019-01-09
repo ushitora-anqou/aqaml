@@ -296,6 +296,15 @@ let tokenize program =
             | 't' -> Buffer.add_char buf '\t' ; aux i
             | '\\' -> Buffer.add_char buf '\\' ; aux i
             | '"' -> Buffer.add_char buf '"' ; aux i
+            | '\n' ->
+                (* string chained with backslash *)
+                let rec skip_space_and_tab i =
+                  let i, ch = next_char i in
+                  match ch with
+                  | ' ' | '\t' -> skip_space_and_tab i
+                  | _ -> i - 1
+                in
+                aux @@ skip_space_and_tab i
             | ch ->
                 Buffer.add_char buf '\\' ;
                 aux (i - 1) )

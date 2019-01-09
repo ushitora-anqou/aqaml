@@ -1561,6 +1561,13 @@ test !r 11 ;
 false || (f () ; true) ;
 test !r 12
 
+;;
+let s = "debugdebugdebugdebugdebugdebugdebugdebugdebug" in
+test
+  "debugdebugdebugdebugdebugdebugdebugdebugdebug \
+   debugdebugdebugdebugdebugdebugdebugdebugdebug"
+  (s ^ " " ^ s)
+
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let id_counter = ref 0
