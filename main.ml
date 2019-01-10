@@ -597,40 +597,39 @@ let parse tokens =
         let tokens, car = parse_let tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
-    | LBrace
-      :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
-         :: Equal :: tokens ->
-        let rec aux fields = function
+    | LBrace :: tokens -> (
+        let rec parse_record_fields first fields tokens =
+          let aux fieldname = function
+            | Equal :: tokens -> parse_let tokens
+            | (Semicolon | RBrace) :: _ as tokens -> (tokens, Var fieldname)
+            | x -> raise_unexpected_token x
+          in
+          match tokens with
+          | (LowerIdent fieldname | LowerIdentWithModule fieldname) :: tokens
+            when first ->
+              let tokens, ast = aux fieldname tokens in
+              parse_record_fields false ((fieldname, ast) :: fields) tokens
           | Semicolon
             :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
-               :: Equal :: tokens ->
-              let tokens, ast = parse_let tokens in
-              aux ((fieldname, ast) :: fields) tokens
+               :: tokens
+            when not first ->
+              let tokens, ast = aux fieldname tokens in
+              parse_record_fields false ((fieldname, ast) :: fields) tokens
           | RBrace :: tokens -> (tokens, fields)
           | x -> raise_unexpected_token x
         in
-        let tokens, ast = parse_let tokens in
-        let tokens, fields = aux [(fieldname, ast)] tokens in
-        (tokens, RecordValue (None, fields))
-    | LBrace :: tokens -> (
-        let tokens, base = parse_prefix tokens in
         match tokens with
-        | With
-          :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
-             :: Equal :: tokens ->
-            let rec aux fields = function
-              | Semicolon
-                :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
-                   :: Equal :: tokens ->
-                  let tokens, ast = parse_let tokens in
-                  aux ((fieldname, ast) :: fields) tokens
-              | RBrace :: tokens -> (tokens, fields)
-              | x -> raise_unexpected_token x
-            in
-            let tokens, ast = parse_let tokens in
-            let tokens, fields = aux [(fieldname, ast)] tokens in
-            (tokens, RecordValueWith (base, fields))
-        | x -> raise_unexpected_token x )
+        | (LowerIdent _ | LowerIdentWithModule _) :: (Equal | Semicolon) :: _
+          ->
+            let tokens, fields = parse_record_fields true [] tokens in
+            (tokens, RecordValue (None, fields))
+        | _ -> (
+            let tokens, base = parse_prefix tokens in
+            match tokens with
+            | With :: tokens ->
+                let tokens, fields = parse_record_fields true [] tokens in
+                (tokens, RecordValueWith (base, fields))
+            | x -> raise_unexpected_token x ) )
     | x -> raise_unexpected_token x
   and parse_prefix = function
     | Exclam :: tokens ->
