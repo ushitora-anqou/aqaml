@@ -2149,8 +2149,13 @@ let parse tokens =
             (tokens, RecordValueWith (base, fields))
         | x -> raise_unexpected_token x )
     | x -> raise_unexpected_token x
+  and parse_prefix = function
+    | Exclam :: tokens ->
+        let tokens, ast = parse_primary tokens in
+        (tokens, Deref ast)
+    | tokens -> parse_primary tokens
   and parse_dot tokens =
-    let tokens, lhs = parse_primary tokens in
+    let tokens, lhs = parse_prefix tokens in
     match tokens with
     | Dot :: LowerIdent fieldname :: tokens ->
         (tokens, RecordDotAccess (None, lhs, fieldname))
@@ -2160,20 +2165,15 @@ let parse tokens =
         | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
         | x -> raise_unexpected_token x )
     | _ -> (tokens, lhs)
-  and parse_prefix = function
-    | Exclam :: tokens ->
-        let tokens, ast = parse_dot tokens in
-        (tokens, Deref ast)
-    | tokens -> parse_dot tokens
   and parse_funccall tokens =
     let rec aux tokens =
       if is_primary tokens || is_dot tokens || is_prefix tokens then
-        let tokens, arg = parse_prefix tokens in
+        let tokens, arg = parse_dot tokens in
         let tokens, args = aux tokens in
         (tokens, arg :: args)
       else (tokens, [])
     in
-    let tokens, func = parse_prefix tokens in
+    let tokens, func = parse_dot tokens in
     let tokens, args = aux tokens in
     if args = [] then (tokens, func) (* not function call *)
     else (tokens, AppCls (func, args))
@@ -3305,3 +3305,99 @@ test
 test
   (analyze (parse (tokenize "external ref : 'a -> 'a ref = \"aqaml_ref\"\n")))
   ([LetFunc (false, "aqaml_main", [UnitValue], Nope, [])], [], [], [])
+
+;;
+let analyzed_data =
+  analyze
+    (parse
+       (tokenize
+          "\n\
+           external ref : 'a -> 'a ref = \"aqaml_ref\"\n\n\
+           external raise : exn -> 'a = \"aqaml_raise\"\n\n\
+           external exit : int -> 'a = \"aqaml_exit\"\n\n\
+           external print_string : string -> unit = \"aqaml_print_string\"\n\n\
+           external string_of_int : int -> string = \"aqaml_string_of_int\"\n\n\
+           external int_of_char : char -> int = \"aqaml_char_code\"\n\n\
+           exception Match_failure of string * int * int\n\n\
+           exception Not_found\n\n\
+           exception Failure of string\n\n\
+           let ignore _ = ()\n\n\
+           let failwith str = raise (Failure str)\n\n\
+           module Char = struct\n\
+           external code : char -> int = \"aqaml_char_code\"\n\
+           end\n\n\
+           type bytes = string\n\n\
+           module Bytes = struct\n\
+           external length : bytes -> int = \"aqaml_string_length\"\n\n\
+           external get : bytes -> int -> char = \"aqaml_string_get\"\n\n\
+           external set : bytes -> int -> char -> unit = \"aqaml_string_set\"\n\n\
+           external create : int -> bytes = \"aqaml_string_create\"\n\n\
+           external sub : bytes -> int -> int -> bytes = \"aqaml_string_sub\"\n\n\
+           external sub_string : bytes -> int -> int -> string = \
+           \"aqaml_string_sub\"\n\n\
+           external blit :\n\
+           bytes -> int -> bytes -> int -> int -> unit\n\
+           = \"aqaml_string_blit\"\n\n\
+           external blit_string :\n\
+           string -> int -> bytes -> int -> int -> unit\n\
+           = \"aqaml_string_blit\"\n\n\
+           let of_string str = str\n\n\
+           let to_string bytes = bytes\n\
+           end\n"))
+in
+test analyzed_data
+  ( [ LetFunc
+        ( false
+        , "aqaml_main"
+        , [UnitValue]
+        , ExprSeq
+            [ Nope
+            ; Nope
+            ; Nope
+            ; LetAndAnalyzed
+                ( [LetFunc (false, "ignore.17", [Var "_.18"], UnitValue, [])]
+                , LetAndAnalyzed
+                    ( [ LetFunc
+                          ( false
+                          , "failwith.19"
+                          , [Var "str.20"]
+                          , AppDir
+                              ( "aqaml_raise"
+                              , [ CtorApp
+                                    ( Some "Failure"
+                                    , "Failure"
+                                    , Some (Var "str.20") ) ] )
+                          , [] ) ]
+                    , ExprSeq
+                        [ Nope
+                        ; LetAndAnalyzed
+                            ( [ LetFunc
+                                  ( false
+                                  , "Bytes.of_string.21"
+                                  , [Var "str.22"]
+                                  , Var "str.22"
+                                  , [] ) ]
+                            , LetAndAnalyzed
+                                ( [ LetFunc
+                                      ( false
+                                      , "Bytes.to_string.23"
+                                      , [Var "bytes.24"]
+                                      , Var "bytes.24"
+                                      , [] ) ]
+                                , Nope ) ) ] ) ) ]
+        , [] )
+    ; LetFunc
+        (false, "Bytes.to_string.23", [Var "bytes.24"], Var "bytes.24", [])
+    ; LetFunc (false, "Bytes.of_string.21", [Var "str.22"], Var "str.22", [])
+    ; LetFunc
+        ( false
+        , "failwith.19"
+        , [Var "str.20"]
+        , AppDir
+            ( "aqaml_raise"
+            , [CtorApp (Some "Failure", "Failure", Some (Var "str.20"))] )
+        , [] )
+    ; LetFunc (false, "ignore.17", [Var "_.18"], UnitValue, []) ]
+  , []
+  , [DefTypeAlias (None, "bytes", TyString)]
+  , ["Failure"; "Not_found"; "Match_failure"] )
