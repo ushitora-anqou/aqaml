@@ -1581,6 +1581,18 @@ test
   {testrecord1_str; testrecord1_int}
   {testrecord1_int= 3; testrecord1_str= "abc"}
 
+;;
+test (0 land 0) 0 ;
+test (1 land 0) 0 ;
+test (0 land 1) 0 ;
+test (1 land 1) 1 ;
+test (31 land 2) 2 ;
+test (0 lor 0) 0 ;
+test (1 lor 0) 1 ;
+test (0 lor 1) 1 ;
+test (1 lor 1) 1 ;
+test (31 lor 2) 31
+
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let id_counter = ref 0

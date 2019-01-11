@@ -48,7 +48,8 @@ let read_lines () =
   in
   String.concat "\n" (List.rev (aux []))
 
-let appfmt buf = ksprintf (fun str -> Buffer.add_string buf (str ^ "\n"))
+let appfmt buf fmt =
+  ksprintf (fun str -> Buffer.add_string buf (str ^ "\n")) fmt
 
 let appstr buf str = Buffer.add_string buf (str ^ "\n")
 
@@ -156,6 +157,8 @@ type token =
   | BarBar
   | AndAnd
   | Ampersand
+  | Lor
+  | Land
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -234,6 +237,8 @@ let string_of_token = function
   | BarBar -> "||"
   | AndAnd -> "&&"
   | Ampersand -> "&"
+  | Lor -> "lor"
+  | Land -> "land"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -399,6 +404,8 @@ let tokenize program =
           | "external" -> aux (External :: acc) i
           | "mutable" -> aux (Mutable :: acc) i
           | "open" -> aux (Open :: acc) i
+          | "land" -> aux (Land :: acc) i
+          | "lor" -> aux (Lor :: acc) i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
                 match maybe_next_char i with
@@ -481,6 +488,8 @@ type ast =
   | ArithmeticRightShift of ast * ast
   | LogicalAnd of ast * ast
   | LogicalOr of ast * ast
+  | BitwiseAnd of ast * ast
+  | BitwiseOr of ast * ast
   | StringConcat of ast * ast
   | ListConcat of ast * ast
   | Negate of ast
@@ -683,8 +692,7 @@ let parse tokens =
     let tokens, lhs = parse_unary tokens in
     aux lhs tokens
   and parse_multiplicative tokens =
-    let rec aux lhs tokens =
-      match tokens with
+    let rec aux lhs = function
       | Star :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (Mul (lhs, rhs)) tokens
@@ -694,7 +702,13 @@ let parse tokens =
       | Mod :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (Rem (lhs, rhs)) tokens
-      | _ -> (tokens, lhs)
+      | Land :: tokens ->
+          let tokens, rhs = parse_shift tokens in
+          aux (BitwiseAnd (lhs, rhs)) tokens
+      | Lor :: tokens ->
+          let tokens, rhs = parse_shift tokens in
+          aux (BitwiseOr (lhs, rhs)) tokens
+      | tokens -> (tokens, lhs)
     in
     let tokens, ast = parse_shift tokens in
     aux ast tokens
@@ -1373,9 +1387,13 @@ let analyze asts =
     | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
     | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
     | Rem (lhs, rhs) -> Rem (aux env lhs, aux env rhs)
-    | LogicalLeftShift (lhs, rhs) -> LogicalLeftShift (lhs, rhs)
-    | LogicalRightShift (lhs, rhs) -> LogicalRightShift (lhs, rhs)
-    | ArithmeticRightShift (lhs, rhs) -> ArithmeticRightShift (lhs, rhs)
+    | LogicalLeftShift (lhs, rhs) -> LogicalLeftShift (aux env lhs, aux env rhs)
+    | LogicalRightShift (lhs, rhs) ->
+        LogicalRightShift (aux env lhs, aux env rhs)
+    | ArithmeticRightShift (lhs, rhs) ->
+        ArithmeticRightShift (aux env lhs, aux env rhs)
+    | BitwiseAnd (lhs, rhs) -> BitwiseAnd (aux env lhs, aux env rhs)
+    | BitwiseOr (lhs, rhs) -> BitwiseOr (aux env lhs, aux env rhs)
     | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
@@ -1508,7 +1526,11 @@ let analyze asts =
                   | x :: xs ->
                       let lhs, rhs = split (n - 1) xs in
                       (x :: lhs, rhs)
-                  | [] -> failwith "n > List.length lst"
+                  | [] ->
+                      failwith
+                      @@ sprintf
+                           "arguments to %s are too little: maybe curring?"
+                           gen_funcname
               in
               let head, tail = split nargs args in
               AppCls (AppDir (gen_funcname, head), tail)
@@ -2157,6 +2179,24 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf @@ untag_int "rax" ;
         appstr buf "sar rax, cl" ;
         appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
+    | BitwiseAnd (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf "and rax, rdi" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
+    | BitwiseOr (lhs, rhs) ->
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env rhs ;
+        appstr buf "pop rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf "or rax, rdi" ;
         appstr buf "push rax" ;
         Buffer.contents buf
     | StringConcat (lhs, rhs) ->
