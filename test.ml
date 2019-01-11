@@ -1593,6 +1593,11 @@ test (0 lor 1) 1 ;
 test (1 lor 1) 1 ;
 test (31 lor 2) 31
 
+;;
+test (max 1 2) 2 ;
+test (max 5 3) 5 ;
+test (max 4 4) 4
+
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let id_counter = ref 0

@@ -20,6 +20,8 @@ let ignore _ = ()
 
 let failwith str = raise (Failure str)
 
+let max a b = if a < b then b else a
+
 module Char = struct
   external code : char -> int = "aqaml_char_code"
 end
