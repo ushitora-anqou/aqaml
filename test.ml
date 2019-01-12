@@ -1598,6 +1598,28 @@ test (max 1 2) 2 ;
 test (max 5 3) 5 ;
 test (max 4 4) 4
 
+;;
+let r = ref 0 in
+for i = -10 to 9 do
+  r := !r + i
+done ;
+test !r (-10) ;
+let r = ref 0 in
+for i = 20 to 10 do
+  r := !r + i
+done ;
+test !r 0 ;
+let r = ref 0 in
+for i = 10 downto -9 do
+  r := !r + i
+done ;
+test !r 10 ;
+let r = ref 0 in
+for i = -10 downto 9 do
+  r := !r + i
+done ;
+test !r 0
+
 let is_capital = function 'A' .. 'Z' -> true | _ -> false
 
 let id_counter = ref 0

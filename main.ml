@@ -159,6 +159,11 @@ type token =
   | Ampersand
   | Lor
   | Land
+  | For
+  | To
+  | Downto
+  | Do
+  | Done
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -239,6 +244,11 @@ let string_of_token = function
   | Ampersand -> "&"
   | Lor -> "lor"
   | Land -> "land"
+  | For -> "for"
+  | To -> "to"
+  | Downto -> "downto"
+  | Do -> "do"
+  | Done -> "done"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -406,6 +416,11 @@ let tokenize program =
           | "open" -> aux (Open :: acc) i
           | "land" -> aux (Land :: acc) i
           | "lor" -> aux (Lor :: acc) i
+          | "for" -> aux (For :: acc) i
+          | "to" -> aux (To :: acc) i
+          | "downto" -> aux (Downto :: acc) i
+          | "do" -> aux (Do :: acc) i
+          | "done" -> aux (Done :: acc) i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
                 match maybe_next_char i with
@@ -523,6 +538,7 @@ type ast =
   | TryWith of ast * (pattern * ast option * ast) list
   | StringGet of ast * ast
   | StringSet of ast * ast * ast
+  | ForLoop of for_loop_dir * string * ast * ast * ast
   | Nope
   | ModuleDef of string * ast list
   (* for analysis *)
@@ -540,6 +556,8 @@ and typedef =
   | DefVariant of typ option * string * (string * typ option) list
   | DefTypeAlias of typ option * string * typ
   | DefRecord of string * (string * typ) list
+
+and for_loop_dir = ForTo | ForDownto
 
 exception Unexpected_ast
 
@@ -884,6 +902,26 @@ let parse tokens =
         | With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, TryWith (cond, cases))
+        | x -> raise_unexpected_token x )
+    | For :: LowerIdent indexname :: Equal :: tokens -> (
+        let tokens, expr1 = parse_expression tokens in
+        match tokens with
+        | ((To | Downto) as dir) :: tokens -> (
+            let tokens, expr2 = parse_expression tokens in
+            match tokens with
+            | Do :: tokens -> (
+                let tokens, expr3 = parse_expression tokens in
+                match tokens with
+                | Done :: tokens ->
+                    ( tokens
+                    , ForLoop
+                        ( (if dir = To then ForTo else ForDownto)
+                        , indexname
+                        , expr1
+                        , expr2
+                        , expr3 ) )
+                | x -> raise_unexpected_token x )
+            | x -> raise_unexpected_token x )
         | x -> raise_unexpected_token x )
     | Let :: tokens -> (
         let parse_let_binding tokens =
@@ -1541,6 +1579,16 @@ let analyze asts =
         failwith (sprintf "not found in analysis (AppCls): %s" funcname) )
     | AppCls (func, args) ->
         AppCls (aux env func, List.map (fun x -> aux env x) args)
+    | ForLoop (dir, indexname, expr1, expr2, expr3) ->
+        let gen_indexname = make_id indexname in
+        let env' =
+          { env with
+            symbols= HashMap.add indexname (Var gen_indexname) env.symbols }
+        in
+        let expr1 = aux env expr1 in
+        let expr2 = aux env expr2 in
+        let expr3 = aux env' expr3 in
+        ForLoop (dir, gen_indexname, expr1, expr2, expr3)
     | LetAnd (recursive, lhs_of_in, rhs_of_in) ->
         (* Split rhs_of_eq into LetVar and LetFunc. At the same time,
          * make a conversion table for function names *)
@@ -2394,6 +2442,41 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "pop rax" ;
         appfmt buf "call aqaml_appcls%d" @@ List.length args ;
         appstr buf "push rax" ;
+        Buffer.contents buf
+    | ForLoop (dir, indexname, expr1, expr2, expr3) ->
+        let loop_label = make_label () in
+        let exit_label = make_label () in
+        let offset = env.offset - 8 in
+        stack_size := max !stack_size (-offset) ;
+        let env' =
+          {offset; varoffset= HashMap.add indexname offset env.varoffset}
+        in
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env expr2 ;
+        appstr buf @@ aux env expr1 ;
+        appstr buf "pop rax" ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        appstr buf "pop rax" ;
+        appfmt buf "cmp [rbp + %d], rax" offset ;
+        appfmt buf "%s %s"
+          (match dir with ForTo -> "jg" | ForDownto -> "jl")
+          exit_label ;
+        appstr buf "push rax" ;
+        appfmt buf "%s:" loop_label ;
+        appfmt buf "pop rax" ;
+        appfmt buf "cmp [rbp + %d], rax" offset ;
+        appfmt buf "%s %s"
+          (match dir with ForTo -> "jg" | ForDownto -> "jl")
+          exit_label ;
+        appstr buf "push rax" ;
+        appstr buf @@ aux env' expr3 ;
+        appstr buf "pop rax /* pop unit value */" ;
+        ( match dir with
+        | ForTo -> appfmt buf "add QWORD PTR [rbp + %d], 2" offset
+        | ForDownto -> appfmt buf "sub QWORD PTR [rbp + %d], 2" offset ) ;
+        appfmt buf "jmp %s" loop_label ;
+        appfmt buf "%s:" exit_label ;
+        appfmt buf "push %d /* push unit value */" @@ tagged_int 0 ;
         Buffer.contents buf
     | LetAndAnalyzed (lets, rhs_of_in) ->
         let buf = Buffer.create 256 in
