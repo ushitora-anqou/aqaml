@@ -205,7 +205,8 @@ let read_line () =
   let rec aux () =
     let ch = try Some (input_char stdin) with End_of_file -> None in
     match ch with
-    | Some '\n' | None -> ()
+    | Some '\n' -> ()
+    | None -> if Buffer.length buf = 0 then raise End_of_file else ()
     | Some ch -> Buffer.add_char buf ch ; aux ()
   in
   aux () ; Buffer.contents buf
