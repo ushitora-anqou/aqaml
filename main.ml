@@ -2713,6 +2713,16 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_printf_ksprintf5"
       [CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr]
       CTyPtr ;
+    appstr buf "aqaml_input_char:" ;
+    let exit_label = make_label () in
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_input_char_detail@PLT" ;
+    appstr buf "cmp rax, -1" ;
+    appfmt buf "jne %s" exit_label ;
+    appstr buf @@ gen_raise_exp_of "End_of_file" false ;
+    appfmt buf "%s:" exit_label ;
+    appstr buf "ret" ;
+    appstr buf "" ;
     appstr buf "aqaml_structural_inequal:" ;
     appstr buf "mov rdi, rax" ;
     appstr buf "mov rsi, rbx" ;

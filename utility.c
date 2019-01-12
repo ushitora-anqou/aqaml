@@ -207,6 +207,17 @@ void aqaml_prerr_string_detail(uint64_t ptr)
     for (uint64_t i = 0; i < length; i++) fputc(val.string->str[i], stderr);
 }
 
+uint64_t aqaml_input_char_detail(uint64_t ptr)
+{
+    AQamlValue chan = get_value(ptr);
+    assert(chan.kind == AQAML_ARRAY);
+    uint64_t fd = chan.array->data[0] >> 1;
+    assert(fd == 0);  // TODO: other in_channel
+    int ch = fgetc(stdin);
+    if (ch == EOF) return -1;
+    return ((uint64_t)ch << 1) | 1;
+}
+
 uint64_t aqaml_concat_list_detail(uint64_t lhs_src, uint64_t rhs_src)
 {
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);

@@ -14,9 +14,19 @@ external int_of_char : char -> int = "aqaml_char_code"
 
 exception Match_failure of string * int * int
 
+exception End_of_file
+
 exception Not_found
 
 exception Failure of string
+
+type in_channel = {descriptor: int}
+
+let stdin = {descriptor= 0}
+
+external input_char : in_channel -> char = "aqaml_input_char"
+
+type 'a option = Some of 'a | None
 
 let ignore _ = ()
 
@@ -186,3 +196,13 @@ module Printf = struct
 
   let eprintf fmt = ksprintf (fun str -> prerr_string str) fmt
 end
+
+let read_line () =
+  let buf = Buffer.create 65 in
+  let rec aux () =
+    let ch = try Some (input_char stdin) with End_of_file -> None in
+    match ch with
+    | Some '\n' | None -> ()
+    | Some ch -> Buffer.add_char buf ch ; aux ()
+  in
+  aux () ; Buffer.contents buf
