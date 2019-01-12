@@ -167,11 +167,14 @@ module Buffer = struct
 
   let contents src = Bytes.sub_string src.buf 0 src.len
 
-  let resize src size =
+  let length buf = buf.len
+
+  let rec resize src size =
     if Bytes.length src.buf < size then (
       let new_buf = Bytes.create @@ (Bytes.length src.buf * 2) in
       Bytes.blit src.buf 0 new_buf 0 src.len ;
-      src.buf <- new_buf )
+      src.buf <- new_buf ;
+      resize src size )
 
   let add_char src ch =
     resize src (src.len + 1) ;
