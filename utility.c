@@ -198,6 +198,15 @@ void aqaml_print_string_detail(uint64_t ptr)
     for (uint64_t i = 0; i < length; i++) putchar(val.string->str[i]);
 }
 
+void aqaml_prerr_string_detail(uint64_t ptr)
+{
+    AQamlValue val = get_value(ptr);
+    assert(val.kind == AQAML_STRING);
+    uint64_t length = aqaml_string_length_detail(ptr);
+
+    for (uint64_t i = 0; i < length; i++) fputc(val.string->str[i], stderr);
+}
+
 uint64_t aqaml_concat_list_detail(uint64_t lhs_src, uint64_t rhs_src)
 {
     AQamlValue lhs = get_value(lhs_src), rhs = get_value(rhs_src);

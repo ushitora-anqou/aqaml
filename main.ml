@@ -2699,6 +2699,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_string_make" [CTyInt; CTyInt] CTyPtr ;
     gen_c_func "aqaml_string_of_int" [CTyInt] CTyPtr ;
     gen_c_func "aqaml_print_string" [CTyPtr] CTyUnit ;
+    gen_c_func "aqaml_prerr_string" [CTyPtr] CTyUnit ;
     gen_c_func "aqaml_printf_ksprintf" [CTyPtr; CTyPtr] CTyPtr ;
     appstr buf
       ".global aqaml_printf_ksprintf1, aqaml_printf_ksprintf2, \

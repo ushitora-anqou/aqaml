@@ -6,6 +6,8 @@ external exit : int -> 'a = "aqaml_exit"
 
 external print_string : string -> unit = "aqaml_print_string"
 
+external prerr_string : string -> unit = "aqaml_prerr_string"
+
 external string_of_int : int -> string = "aqaml_string_of_int"
 
 external int_of_char : char -> int = "aqaml_char_code"
@@ -181,4 +183,6 @@ module Printf = struct
   let sprintf fmt = ksprintf (fun str -> str) fmt
 
   let printf fmt = ksprintf (fun str -> print_string str) fmt
+
+  let eprintf fmt = ksprintf (fun str -> prerr_string str) fmt
 end
