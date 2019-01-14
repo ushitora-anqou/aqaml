@@ -3452,3 +3452,13 @@ test analyzed_data
   , []
   , [DefTypeAlias (None, "bytes", TyString)]
   , ["Failure"; "Not_found"; "Match_failure"] )
+
+(* Following code causes SEGV
+ * unless tail call elimination is enabled then  *)
+
+let rec dec n = if n = 0 then 0 else dec (n - 1)
+
+let rec pow2 n = if n = 0 then 1 else pow2 (n - 1) * 2
+
+;;
+test (dec (pow2 20)) 0

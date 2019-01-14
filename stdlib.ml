@@ -210,3 +210,5 @@ let read_line () =
     | Some ch -> Buffer.add_char buf ch ; aux ()
   in
   aux () ; Buffer.contents buf
+
+let not x = if x then false else true

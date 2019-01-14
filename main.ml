@@ -1836,6 +1836,8 @@ type gen_environment = {offset: int; varoffset: int HashMap.t}
 
 type ctype = CTyInt | CTyUnit | CTyPtr
 
+type tail_recursive = Tail | NonTail
+
 let rec generate (letfuncs, strings, typedefs, exps) =
   let stack_size = ref 0 in
   let records_idx = Hashtbl.create 16 in
@@ -2026,7 +2028,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
       appstr buf "mov [rax], rbx" ) ;
     appstr buf @@ gen_raise () ;
     Buffer.contents buf
-  and gen_pattern_match_cases env cases exp_body =
+  and gen_pattern_match_cases env cases istail exp_body =
     (* Assume that the target value is in stack top *)
     let buf = Buffer.create 128 in
     let saved_rsp_offset = env.offset - 8 in
@@ -2062,12 +2064,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ( match whn with
           | None -> ()
           | Some expr ->
-              appstr buf @@ aux env expr ;
+              appstr buf @@ aux env (NonTail, expr) ;
               appstr buf "pop rax" ;
               appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
               appfmt buf "je %s" next_label ) ;
           appstr buf "pop rax" ;
-          appstr buf @@ aux env case ;
+          appstr buf @@ aux env (istail, case) ;
           appfmt buf "jmp %s /* exit label */" exit_label ;
           next_label )
         (make_label ()) cases
@@ -2078,16 +2080,16 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   and aux env = function
-    | Nope -> "push 0 /* dummy */"
-    | IntValue num -> sprintf "push %d" (tagged_int num)
-    | CharValue ch -> aux env @@ IntValue (Char.code ch)
-    | UnitValue | EmptyList -> aux env (IntValue 0)
-    | StringValue (id, _) -> sprintf "lea rax, [rip + %s]\npush rax" id
-    | Cons (car, cdr) ->
+    | _, Nope -> "push 0 /* dummy */"
+    | _, IntValue num -> sprintf "push %d" (tagged_int num)
+    | istail, CharValue ch -> aux env (istail, IntValue (Char.code ch))
+    | istail, (UnitValue | EmptyList) -> aux env (istail, IntValue 0)
+    | _, StringValue (id, _) -> sprintf "lea rax, [rip + %s]\npush rax" id
+    | _, Cons (car, cdr) ->
         String.concat "\n"
           [ "/* Cons BEGIN */"
-          ; aux env cdr
-          ; aux env car
+          ; aux env (NonTail, cdr)
+          ; aux env (NonTail, car)
           ; gen_alloc_block 2 0 0
           ; "pop rdi" (* car *)
           ; "mov [rax], rdi"
@@ -2095,12 +2097,13 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "mov [rax + 8], rdi"
           ; "push rax"
           ; "/* Cons END */" ]
-    | TupleValue values ->
+    | _, TupleValue values ->
         (* +1 for header *)
         let size = List.length values in
         String.concat "\n"
           [ "/* TupleValue BEGIN */"
-          ; String.concat "\n" (List.map (aux env) (List.rev values))
+          ; String.concat "\n"
+              (List.map (fun x -> aux env (NonTail, x)) (List.rev values))
           ; gen_alloc_block size 0 1
           ; String.concat "\n"
               (List.mapi
@@ -2108,7 +2111,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                  values)
           ; "push rax"
           ; "/* TupleValue END */" ]
-    | RecordValue (Some typename, fields) ->
+    | _, RecordValue (Some typename, fields) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
         let buf = Buffer.create 128 in
@@ -2117,7 +2120,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "mov [rbp + %d], rax" offset ;
         List.iter
           (fun (fieldname, ast) ->
-            appstr buf @@ aux env ast ;
+            appstr buf @@ aux env (NonTail, ast) ;
             appstr buf "pop rax" ;
             appfmt buf "mov rdi, [rbp + %d]" offset ;
             let idx = Hashtbl.find records_idx (typename, fieldname) in
@@ -2126,18 +2129,18 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "push [rbp + %d]" offset ;
         appfmt buf "/* RecordValue %s END */" typename ;
         Buffer.contents buf
-    | RecordDotAccess (Some typename, ast, fieldname) ->
+    | _, RecordDotAccess (Some typename, ast, fieldname) ->
         let idx = Hashtbl.find records_idx (typename, fieldname) in
         let buf = Buffer.create 128 in
         appfmt buf "/* RecordDotAccess %s %s */" typename fieldname ;
-        appstr buf @@ aux env ast ;
+        appstr buf @@ aux env (NonTail, ast) ;
         appstr buf "pop rax" ;
         appfmt buf "push [rax + %d]" (idx * 8) ;
         Buffer.contents buf
-    | Add (lhs, rhs) ->
+    | _, Add (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rdi"
           ; untag_int "rdi"
           ; "pop rax"
@@ -2145,10 +2148,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "add rax, rdi"
           ; tag_int "rax"
           ; "push rax" ]
-    | Sub (lhs, rhs) ->
+    | _, Sub (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rdi"
           ; untag_int "rdi"
           ; "pop rax"
@@ -2156,10 +2159,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "sub rax, rdi"
           ; tag_int "rax"
           ; "push rax" ]
-    | Mul (lhs, rhs) ->
+    | _, Mul (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rdi"
           ; untag_int "rdi"
           ; "pop rax"
@@ -2167,10 +2170,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "imul rax, rdi"
           ; tag_int "rax"
           ; "push rax" ]
-    | Div (lhs, rhs) ->
+    | _, Div (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rdi" ;
         appstr buf @@ untag_int "rdi" ;
         appstr buf "pop rax" ;
@@ -2180,10 +2183,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf @@ tag_int "rax" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | Rem (lhs, rhs) ->
+    | _, Rem (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rdi" ;
         appstr buf @@ untag_int "rdi" ;
         appstr buf "pop rax" ;
@@ -2193,10 +2196,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf @@ tag_int "rdx" ;
         appstr buf "push rdx" ;
         Buffer.contents buf
-    | LogicalLeftShift (lhs, rhs) ->
+    | _, LogicalLeftShift (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rcx" ;
         appstr buf @@ untag_int "rcx" ;
         appstr buf "pop rax" ;
@@ -2205,11 +2208,11 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf @@ tag_int "rax" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | LogicalRightShift (lhs, rhs) ->
+    | _, LogicalRightShift (lhs, rhs) ->
         (* Note that the size of int is 63bit, not 64bit. *)
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rcx" ;
         appstr buf @@ untag_int "rcx" ;
         appstr buf "pop rax" ;
@@ -2217,10 +2220,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "or rax, 1" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | ArithmeticRightShift (lhs, rhs) ->
+    | _, ArithmeticRightShift (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rcx" ;
         appstr buf @@ untag_int "rcx" ;
         appstr buf "pop rax" ;
@@ -2229,99 +2232,99 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf @@ tag_int "rax" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | BitwiseAnd (lhs, rhs) ->
+    | _, BitwiseAnd (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rdi" ;
         appstr buf "pop rax" ;
         appstr buf "and rax, rdi" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | BitwiseOr (lhs, rhs) ->
+    | _, BitwiseOr (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rdi" ;
         appstr buf "pop rax" ;
         appstr buf "or rax, rdi" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | StringConcat (lhs, rhs) ->
+    | _, StringConcat (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rbx" ;
         appstr buf "pop rax" ;
         appstr buf "call aqaml_concat_string" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | ListConcat (lhs, rhs) ->
+    | _, ListConcat (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rbx" ;
         appstr buf "pop rax" ;
         appstr buf "call aqaml_concat_list" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | RefAssign (lhs, rhs) ->
+    | _, RefAssign (lhs, rhs) ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rbx" ;
         appstr buf "pop rax" ;
         appstr buf "mov [rax], rbx" ;
         (* push unit value *)
         appstr buf "push 1" ;
         Buffer.contents buf
-    | RecordAssign (Some typename, lhs, fieldname, rhs) ->
+    | _, RecordAssign (Some typename, lhs, fieldname, rhs) ->
         let idx = Hashtbl.find records_idx (typename, fieldname) in
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rbx" ;
         appstr buf "pop rax" ;
         appfmt buf "mov [rax + %d], rbx" (idx * 8) ;
         (* push unit value *)
         appstr buf "push 1" ;
         Buffer.contents buf
-    | Deref ast ->
+    | _, Deref ast ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env ast ;
+        appstr buf @@ aux env (NonTail, ast) ;
         appstr buf "pop rax" ;
         appstr buf "push [rax]" ;
         Buffer.contents buf
-    | Positate ast -> ""
-    | Negate ast ->
+    | _, Positate ast -> ""
+    | _, Negate ast ->
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env ast ;
+        appstr buf @@ aux env (NonTail, ast) ;
         appstr buf "pop rax" ;
         appstr buf @@ untag_int "rax" ;
         appstr buf "neg rax" ;
         appstr buf @@ tag_int "rax" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | StructEqual (lhs, rhs) ->
+    | _, StructEqual (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rbx"
           ; "pop rax"
           ; "call aqaml_structural_equal"
           ; "push rax" ]
-    | StructInequal (lhs, rhs) ->
+    | _, StructInequal (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rbx"
           ; "pop rax"
           ; "call aqaml_structural_inequal"
           ; "push rax" ]
-    | LessThan (lhs, rhs) ->
+    | _, LessThan (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rdi"
           ; "pop rax"
           ; "cmp rax, rdi"
@@ -2329,10 +2332,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "movzx rax, al"
           ; tag_int "rax"
           ; "push rax" ]
-    | LessThanEqual (lhs, rhs) ->
+    | _, LessThanEqual (lhs, rhs) ->
         String.concat "\n"
-          [ aux env lhs
-          ; aux env rhs
+          [ aux env (NonTail, lhs)
+          ; aux env (NonTail, rhs)
           ; "pop rdi"
           ; "pop rax"
           ; "cmp rax, rdi"
@@ -2340,15 +2343,15 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "movzx rax, al"
           ; tag_int "rax"
           ; "push rax" ]
-    | LogicalAnd (lhs, rhs) ->
+    | _, LogicalAnd (lhs, rhs) ->
         let false_label = make_label () in
         let exit_label = make_label () in
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
         appstr buf "pop rax" ;
         appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
         appfmt buf "je %s" false_label ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rax" ;
         appfmt buf "cmp rax, %d" @@ tagged_int 0 ;
         appfmt buf "je %s" false_label ;
@@ -2358,15 +2361,15 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "push %d" @@ tagged_int 0 ;
         appfmt buf "%s:" exit_label ;
         Buffer.contents buf
-    | LogicalOr (lhs, rhs) ->
+    | _, LogicalOr (lhs, rhs) ->
         let true_label = make_label () in
         let exit_label = make_label () in
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env lhs ;
+        appstr buf @@ aux env (NonTail, lhs) ;
         appstr buf "pop rax" ;
         appfmt buf "cmp rax, %d" @@ tagged_int 1 ;
         appfmt buf "je %s" true_label ;
-        appstr buf @@ aux env rhs ;
+        appstr buf @@ aux env (NonTail, rhs) ;
         appstr buf "pop rax" ;
         appfmt buf "cmp rax, %d" @@ tagged_int 1 ;
         appfmt buf "je %s" true_label ;
@@ -2376,74 +2379,101 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "push %d" @@ tagged_int 1 ;
         appfmt buf "%s:" exit_label ;
         Buffer.contents buf
-    | IfThenElse (cond, then_body, else_body) ->
+    | istail, IfThenElse (cond, then_body, else_body) ->
         let false_label = make_label () in
         let exit_label = make_label () in
         String.concat "\n"
-          [ aux env cond
+          [ aux env (NonTail, cond)
           ; "pop rax"
           ; "cmp rax, 1" (* if rax = 0 then then_body else else_body *)
           ; sprintf "je %s" false_label
-          ; aux env then_body
+          ; aux env (istail, then_body)
           ; sprintf "jmp %s" exit_label
           ; sprintf "%s:" false_label
           ; ( match else_body with
-            | None -> aux env (IntValue 0) (* unit value is IntValue 0 *)
-            | Some else_body -> aux env else_body )
+            | None ->
+                aux env (istail, IntValue 0) (* unit value is IntValue 0 *)
+            | Some else_body -> aux env (istail, else_body) )
           ; sprintf "%s:" exit_label ]
-    | ExprSeq exprs -> String.concat "\npop rax\n" (List.map (aux env) exprs)
-    | Var varname -> (
+    | istail, ExprSeq exprs ->
+        String.concat "\npop rax\n"
+          (List.mapi
+             (fun i x ->
+               aux env
+                 ((if i = List.length exprs - 1 then istail else NonTail), x)
+               )
+             exprs)
+    | _, Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
         String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
       with Not_found ->
         failwith (sprintf "not found in code generation: %s" varname) )
-    | CtorApp (Some typename, ctorname, None) ->
+    | istail, CtorApp (Some typename, ctorname, None) ->
         aux env
-        @@ IntValue
-             ( try Hashtbl.find ctors_id (typename, ctorname)
-               with Not_found -> Hashtbl.find exps_id typename )
-    | CtorApp (Some typename, ctorname, Some arg) ->
+        @@ ( istail
+           , IntValue
+               ( try Hashtbl.find ctors_id (typename, ctorname)
+                 with Not_found -> Hashtbl.find exps_id typename ) )
+    | _, CtorApp (Some typename, ctorname, Some arg) ->
         let buf = Buffer.create 128 in
         appstr buf
         @@ gen_alloc_block 1 0
              ( try Hashtbl.find ctors_id (typename, ctorname)
                with Not_found -> Hashtbl.find exps_id typename ) ;
         appstr buf "push rax" ;
-        appstr buf @@ aux env arg ;
+        appstr buf @@ aux env (NonTail, arg) ;
         appstr buf "pop rdi" ;
         appstr buf "pop rax" ;
         appfmt buf "mov [rax], rdi" ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | AppDir (funcname, args) ->
+    | istail, AppDir (funcname, args) ->
         let buf = Buffer.create 128 in
-        List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
+        List.iter
+          (fun arg -> appstr buf @@ aux env (NonTail, arg))
+          (List.rev args) ;
         List.iteri
           (fun index reg ->
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
-        appfmt buf "call %s" funcname ;
-        appstr buf "push rax" ;
+        ( match istail with
+        | NonTail ->
+            appfmt buf "call %s" funcname ;
+            appstr buf "push rax"
+        | Tail ->
+            (* TODO: arguments passed via stack *)
+            appstr buf "mov rsp, rbp" ;
+            appstr buf "pop rbp" ;
+            appfmt buf "jmp %s" funcname ) ;
         Buffer.contents buf
-    | AppCls (func, args) ->
+    | istail, AppCls (func, args) ->
         (* call aqaml_appcls *)
         (* TODO: Any better way exists? *)
         (* TODO: only 9 or less arguments are allowed *)
         if List.length args > 9 then
           failwith "only 9 or less arguments are allowed (not implemented)" ;
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env func ;
-        List.iter (fun arg -> appstr buf @@ aux env arg) (List.rev args) ;
+        appstr buf @@ aux env (NonTail, func) ;
+        List.iter
+          (fun arg -> appstr buf @@ aux env (NonTail, arg))
+          (List.rev args) ;
         List.iteri
           (fun index reg ->
             if index < List.length args then appfmt buf "pop %s" reg )
           ["rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"] ;
         appstr buf "pop rax" ;
-        appfmt buf "call aqaml_appcls%d" @@ List.length args ;
-        appstr buf "push rax" ;
+        ( match istail with
+        | NonTail ->
+            appfmt buf "call aqaml_appcls%d" @@ List.length args ;
+            appstr buf "push rax"
+        | Tail ->
+            (* TODO: arguments passed via stack *)
+            appstr buf "mov rsp, rbp" ;
+            appstr buf "pop rbp" ;
+            appfmt buf "jmp aqaml_appcls%d" @@ List.length args ) ;
         Buffer.contents buf
-    | ForLoop (dir, indexname, expr1, expr2, expr3) ->
+    | _, ForLoop (dir, indexname, expr1, expr2, expr3) ->
         let loop_label = make_label () in
         let exit_label = make_label () in
         let offset = env.offset - 8 in
@@ -2452,8 +2482,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           {offset; varoffset= HashMap.add indexname offset env.varoffset}
         in
         let buf = Buffer.create 128 in
-        appstr buf @@ aux env expr2 ;
-        appstr buf @@ aux env expr1 ;
+        appstr buf @@ aux env (NonTail, expr2) ;
+        appstr buf @@ aux env (NonTail, expr1) ;
         appstr buf "pop rax" ;
         appfmt buf "mov [rbp + %d], rax" offset ;
         appstr buf "pop rax" ;
@@ -2469,7 +2499,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           (match dir with ForTo -> "jg" | ForDownto -> "jl")
           exit_label ;
         appstr buf "push rax" ;
-        appstr buf @@ aux env' expr3 ;
+        appstr buf @@ aux env' (NonTail, expr3) ;
         appstr buf "pop rax /* pop unit value */" ;
         ( match dir with
         | ForTo -> appfmt buf "add QWORD PTR [rbp + %d], 2" offset
@@ -2478,7 +2508,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "%s:" exit_label ;
         appfmt buf "push %d /* push unit value */" @@ tagged_int 0 ;
         Buffer.contents buf
-    | LetAndAnalyzed (lets, rhs_of_in) ->
+    | istail, LetAndAnalyzed (lets, rhs_of_in) ->
         let buf = Buffer.create 256 in
         let aux' env' = function
           | LetVar (false, bind, lhs) ->
@@ -2493,7 +2523,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                          (fun i n -> (n, env'.offset - ((i + 1) * 8)))
                          varnames }
               in
-              appstr buf @@ aux env lhs ;
+              appstr buf @@ aux env (NonTail, lhs) ;
               appstr buf @@ gen_assign_pattern_or_raise env' bind ;
               env'
           | LetFunc (_, funcname, _, _, _) ->
@@ -2506,9 +2536,9 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           | _ -> raise Unexpected_ast
         in
         let env' = List.fold_left (fun env le -> aux' env le) env lets in
-        appstr buf @@ aux env' rhs_of_in ;
+        appstr buf @@ aux env' (istail, rhs_of_in) ;
         Buffer.contents buf
-    | MakeCls (funcname, nargs, freevars) ->
+    | _, MakeCls (funcname, nargs, freevars) ->
         let buf = Buffer.create 128 in
         appstr buf @@ gen_alloc_block (List.length freevars + 2) 0 247 ;
         appfmt buf "lea rdi, [rip + %s]" funcname ;
@@ -2522,12 +2552,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           freevars ;
         appstr buf "push rax" ;
         Buffer.contents buf
-    | MatchWith (cond, cases) ->
+    | istail, MatchWith (cond, cases) ->
         let buf = Buffer.create 256 in
         appstr buf "/* MatchWith BEGIN */" ;
-        appstr buf @@ aux env cond ;
+        appstr buf @@ aux env (NonTail, cond) ;
         appstr buf
-        @@ gen_pattern_match_cases env cases
+        @@ gen_pattern_match_cases env cases istail
              (let buf = Buffer.create 128 in
               appstr buf "mov rax, 1" ;
               (* TODO: arguments for Match_failure *)
@@ -2535,7 +2565,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
               Buffer.contents buf) ;
         appstr buf "/* MatchWith END */" ;
         Buffer.contents buf
-    | TryWith (cond, cases) ->
+    | istail, TryWith (cond, cases) ->
         let offset = env.offset - 8 in
         stack_size := max !stack_size (-offset) ;
         let env = {env with offset} in
@@ -2549,7 +2579,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "push r13" ;
         appstr buf "push r14" ;
         appstr buf "mov r14, rsp" ;
-        appstr buf @@ aux env cond ;
+        appstr buf @@ aux env (NonTail, cond) ;
         appstr buf "pop rax" ;
         appstr buf "pop r14 /* pop for r14 */" ;
         appstr buf "pop rbx /* pop for r13 */" ;
@@ -2561,7 +2591,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "mov [rbp + %d], rax" offset ;
         appstr buf "push rax" ;
         appstr buf
-        @@ gen_pattern_match_cases env cases
+        @@ gen_pattern_match_cases env cases istail
              (let buf = Buffer.create 128 in
               appfmt buf "mov rax, [rbp + %d]" offset ;
               appstr buf @@ gen_raise () ;
@@ -2614,7 +2644,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                           freevars }
                in
                stack_size := -env.offset ;
-               let code = aux env func in
+               let code = aux env (Tail, func) in
                let buf = Buffer.create 256 in
                appfmt buf "/* %s(%d) */"
                  (if recursive then "recursive" else "")
