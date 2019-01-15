@@ -182,7 +182,7 @@ type token =
   | Match
   | With
   | Arrow
-  | Bar
+  | Pipe
   | Fun
   | Function
   | As
@@ -220,7 +220,7 @@ type token =
   | LArrow
   | Mutable
   | Open
-  | BarBar
+  | PipePipe
   | AndAnd
   | Ampersand
   | Lor
@@ -267,7 +267,7 @@ let string_of_token = function
   | Match -> "match"
   | With -> "with"
   | Arrow -> "->"
-  | Bar -> "|"
+  | Pipe -> "|"
   | Fun -> "fun"
   | Function -> "function"
   | As -> "as"
@@ -305,7 +305,7 @@ let string_of_token = function
   | LArrow -> "<-"
   | Mutable -> "mutable"
   | Open -> "open"
-  | BarBar -> "||"
+  | PipePipe -> "||"
   | AndAnd -> "&&"
   | Ampersand -> "&"
   | Lor -> "lor"
@@ -517,7 +517,7 @@ let tokenize program =
       | '!' -> aux (Exclam :: acc) i
       | '{' -> aux (LBrace :: acc) i
       | '}' -> aux (RBrace :: acc) i
-      | '|' -> switch_char i Bar [('|', BarBar)]
+      | '|' -> switch_char i Pipe [('|', PipePipe)]
       | '&' -> switch_char i Ampersand [('&', AndAnd)]
       | '@' -> switch_char i Naruto [('@', NarutoNaruto)]
       | '.' -> switch_char i Dot [('.', DotDot); ('[', DotLBracket)]
@@ -865,7 +865,7 @@ let parse tokens =
     aux ast tokens
   and parse_logical_or tokens =
     let rec aux lhs = function
-      | BarBar :: tokens ->
+      | PipePipe :: tokens ->
           let tokens, rhs = parse_logical_and tokens in
           aux (LogicalOr (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -935,7 +935,7 @@ let parse tokens =
         | x -> raise_unexpected_token x
       in
       match tokens with
-      | Bar :: tokens -> aux' tokens
+      | Pipe :: tokens -> aux' tokens
       | _ -> if first then aux' tokens else (tokens, List.rev cases)
     in
     aux true [] tokens
@@ -1103,7 +1103,7 @@ let parse tokens =
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_pattern_or tokens =
     let rec aux lhs = function
-      | Bar :: tokens ->
+      | Pipe :: tokens ->
           let tokens, rhs = parse_pattern_tuple tokens in
           aux (PtnOr (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -1203,13 +1203,13 @@ let parse tokens =
       | LowerIdent typename :: Equal :: tokens -> (
           let parse_variant tokens =
             let rec aux first ctors = function
-              | Bar :: CapitalIdent ctorname :: Of :: tokens ->
+              | Pipe :: CapitalIdent ctorname :: Of :: tokens ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
               | CapitalIdent ctorname :: Of :: tokens when first ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
-              | Bar :: CapitalIdent ctorname :: tokens ->
+              | Pipe :: CapitalIdent ctorname :: tokens ->
                   aux false ((ctorname, None) :: ctors) tokens
               | CapitalIdent ctorname :: tokens when first ->
                   aux false ((ctorname, None) :: ctors) tokens
@@ -1220,7 +1220,7 @@ let parse tokens =
           in
           match tokens with
           | CapitalIdent str :: _ -> parse_variant tokens
-          | Bar :: _ -> parse_variant tokens
+          | Pipe :: _ -> parse_variant tokens
           (* TODO: skip mutable *)
           | LBrace :: LowerIdent fieldname :: Colon :: tokens
            |LBrace :: Mutable :: LowerIdent fieldname :: Colon :: tokens ->
