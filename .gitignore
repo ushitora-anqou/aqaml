@@ -25,5 +25,11 @@ setup.log
 # Written for aqaml
 aqaml
 _test.s
-
 _test.ml
+_self_aqaml
+_self_aqaml.s
+_self_test.sh
+_selfself_aqaml
+_selfself_aqaml.s
+_selfself_test.sh
+
