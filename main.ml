@@ -1958,11 +1958,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   let tagged_int num = (num lsl 1) lor 1 in
   let rec gen_alloc_block size color tag =
     (* allocated block address is in rax *)
-    String.concat "\n"
-      [ sprintf "mov rdi, %d" size
-      ; sprintf "mov rsi, %d" color
-      ; sprintf "mov rdx, %d" tag
-      ; "call aqaml_alloc_block@PLT" ]
+    let buf = Buffer.create 128 in
+    appfmt buf "mov rdi, %d" size ;
+    appfmt buf "mov rsi, %d" color ;
+    appfmt buf "mov rdx, %d" tag ;
+    appstr buf "call aqaml_alloc_block@PLT" ;
+    Buffer.contents buf
   in
   let rec gen_assign_pattern env exp_label = function
     | UnitValue | EmptyList -> gen_assign_pattern env exp_label @@ IntValue 0
@@ -1992,24 +1993,25 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "mov [rbp + %d], rax" offset ;
         Buffer.contents buf
     | Cons (car, cdr) ->
-        String.concat "\n"
-          [ "pop rax"
-          ; "cmp rax, 1"
-          ; "je " ^ exp_label
-          ; "push QWORD PTR [rax]"
-          ; "push QWORD PTR [rax + 8]"
-          ; gen_assign_pattern env exp_label cdr
-          ; gen_assign_pattern env exp_label car ]
+        let buf = Buffer.create 128 in
+        appstr buf "pop rax" ;
+        appstr buf "cmp rax, 1" ;
+        appfmt buf "je %s" exp_label ;
+        appstr buf "push QWORD PTR [rax]" ;
+        appstr buf "push QWORD PTR [rax + 8]" ;
+        appstr buf @@ gen_assign_pattern env exp_label cdr ;
+        appstr buf @@ gen_assign_pattern env exp_label car ;
+        Buffer.contents buf
     | TupleValue values ->
-        String.concat "\n"
-          [ "pop rax"
-          ; String.concat "\n"
-              (List.mapi
-                 (fun i _ -> sprintf "push QWORD PTR [rax + %d]" (i * 8))
-                 values)
-          ; String.concat "\n"
-              (List.map (gen_assign_pattern env exp_label) (List.rev values))
-          ]
+        let buf = Buffer.create 128 in
+        appstr buf "pop rax" ;
+        List.iteri
+          (fun i _ -> appfmt buf "push QWORD PTR [rax + %d]" (i * 8))
+          values ;
+        List.iter
+          (fun x -> appstr buf @@ gen_assign_pattern env exp_label x)
+          (List.rev values) ;
+        Buffer.contents buf
     | CtorApp (Some typename, ctorname, None) ->
         gen_assign_pattern env exp_label
         @@ IntValue
@@ -2164,31 +2166,33 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     | istail, (UnitValue | EmptyList) -> aux env (istail, IntValue 0)
     | _, StringValue (id, _) -> sprintf "lea rax, [rip + %s]\npush rax" id
     | _, Cons (car, cdr) ->
-        String.concat "\n"
-          [ "/* Cons BEGIN */"
-          ; aux env (NonTail, cdr)
-          ; aux env (NonTail, car)
-          ; gen_alloc_block 2 0 0
-          ; "pop rdi" (* car *)
-          ; "mov [rax], rdi"
-          ; "pop rdi" (* cdr *)
-          ; "mov [rax + 8], rdi"
-          ; "push rax"
-          ; "/* Cons END */" ]
+        let buf = Buffer.create 128 in
+        appstr buf "/* Cons BEGIN */" ;
+        appstr buf @@ aux env (NonTail, cdr) ;
+        appstr buf @@ aux env (NonTail, car) ;
+        appstr buf @@ gen_alloc_block 2 0 0 ;
+        appstr buf "pop rdi /* car */" ;
+        appstr buf "mov [rax], rdi" ;
+        appstr buf "pop rdi /* cdr */" ;
+        appstr buf "mov [rax + 8], rdi" ;
+        appstr buf "push rax" ;
+        appstr buf "/* Cons END */" ;
+        Buffer.contents buf
     | _, TupleValue values ->
         (* +1 for header *)
         let size = List.length values in
-        String.concat "\n"
-          [ "/* TupleValue BEGIN */"
-          ; String.concat "\n"
-              (List.map (fun x -> aux env (NonTail, x)) (List.rev values))
-          ; gen_alloc_block size 0 1
-          ; String.concat "\n"
-              (List.mapi
-                 (fun i _ -> sprintf "pop rdi\nmov [rax + %d], rdi" (i * 8))
-                 values)
-          ; "push rax"
-          ; "/* TupleValue END */" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ "/* TupleValue BEGIN */" ;
+        List.iter
+          (fun x -> appstr buf @@ aux env (NonTail, x))
+          (List.rev values) ;
+        appstr buf @@ gen_alloc_block size 0 1 ;
+        List.iteri
+          (fun i _ -> appfmt buf "pop rdi\nmov [rax + %d], rdi" (i * 8))
+          values ;
+        appstr buf @@ "push rax" ;
+        appstr buf @@ "/* TupleValue END */" ;
+        Buffer.contents buf
     | _, RecordValue (Some typename, fields) ->
         let offset = new_offset env 1 in
         let buf = Buffer.create 128 in
@@ -2215,38 +2219,41 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "push [rax + %d]" (idx * 8) ;
         Buffer.contents buf
     | _, Add (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rdi"
-          ; untag_int "rdi"
-          ; "pop rax"
-          ; untag_int "rax"
-          ; "add rax, rdi"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf @@ "pop rdi" ;
+        appstr buf @@ untag_int "rdi" ;
+        appstr buf @@ "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf @@ "add rax, rdi" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf @@ "push rax" ;
+        Buffer.contents buf
     | _, Sub (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rdi"
-          ; untag_int "rdi"
-          ; "pop rax"
-          ; untag_int "rax"
-          ; "sub rax, rdi"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf @@ "pop rdi" ;
+        appstr buf @@ untag_int "rdi" ;
+        appstr buf @@ "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf @@ "sub rax, rdi" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf @@ "push rax" ;
+        Buffer.contents buf
     | _, Mul (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rdi"
-          ; untag_int "rdi"
-          ; "pop rax"
-          ; untag_int "rax"
-          ; "imul rax, rdi"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf @@ "pop rdi" ;
+        appstr buf @@ untag_int "rdi" ;
+        appstr buf @@ "pop rax" ;
+        appstr buf @@ untag_int "rax" ;
+        appstr buf @@ "imul rax, rdi" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf @@ "push rax" ;
+        Buffer.contents buf
     | _, Div (lhs, rhs) ->
         let buf = Buffer.create 128 in
         appstr buf @@ aux env (NonTail, lhs) ;
@@ -2383,43 +2390,47 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "push rax" ;
         Buffer.contents buf
     | _, StructEqual (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rbx"
-          ; "pop rax"
-          ; "call aqaml_structural_equal"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf @@ "pop rbx" ;
+        appstr buf @@ "pop rax" ;
+        appstr buf @@ "call aqaml_structural_equal" ;
+        appstr buf @@ "push rax" ;
+        Buffer.contents buf
     | _, StructInequal (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rbx"
-          ; "pop rax"
-          ; "call aqaml_structural_inequal"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf "pop rbx" ;
+        appstr buf "pop rax" ;
+        appstr buf "call aqaml_structural_inequal" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | _, LessThan (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rdi"
-          ; "pop rax"
-          ; "cmp rax, rdi"
-          ; "setl al"
-          ; "movzx rax, al"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf "pop rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf "cmp rax, rdi" ;
+        appstr buf "setl al" ;
+        appstr buf "movzx rax, al" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | _, LessThanEqual (lhs, rhs) ->
-        String.concat "\n"
-          [ aux env (NonTail, lhs)
-          ; aux env (NonTail, rhs)
-          ; "pop rdi"
-          ; "pop rax"
-          ; "cmp rax, rdi"
-          ; "setle al"
-          ; "movzx rax, al"
-          ; tag_int "rax"
-          ; "push rax" ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, lhs) ;
+        appstr buf @@ aux env (NonTail, rhs) ;
+        appstr buf "pop rdi" ;
+        appstr buf "pop rax" ;
+        appstr buf "cmp rax, rdi" ;
+        appstr buf "setle al" ;
+        appstr buf "movzx rax, al" ;
+        appstr buf @@ tag_int "rax" ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
     | _, LogicalAnd (lhs, rhs) ->
         let false_label = make_label () in
         let exit_label = make_label () in
@@ -2459,19 +2470,21 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     | istail, IfThenElse (cond, then_body, else_body) ->
         let false_label = make_label () in
         let exit_label = make_label () in
-        String.concat "\n"
-          [ aux env (NonTail, cond)
-          ; "pop rax"
-          ; "cmp rax, 1" (* if rax = 0 then then_body else else_body *)
-          ; sprintf "je %s" false_label
-          ; aux env (istail, then_body)
-          ; sprintf "jmp %s" exit_label
-          ; sprintf "%s:" false_label
-          ; ( match else_body with
-            | None ->
-                aux env (istail, IntValue 0) (* unit value is IntValue 0 *)
-            | Some else_body -> aux env (istail, else_body) )
-          ; sprintf "%s:" exit_label ]
+        let buf = Buffer.create 128 in
+        appstr buf @@ aux env (NonTail, cond) ;
+        appstr buf "pop rax" ;
+        appstr buf "cmp rax, 1" (* if rax = 0 then then_body else else_body *) ;
+        appfmt buf "je %s" false_label ;
+        appstr buf @@ aux env (istail, then_body) ;
+        appfmt buf "jmp %s" exit_label ;
+        appfmt buf "%s:" false_label ;
+        ( match else_body with
+        | None ->
+            appstr buf @@ aux env (istail, IntValue 0)
+            (* unit value is IntValue 0 *)
+        | Some else_body -> appstr buf @@ aux env (istail, else_body) ) ;
+        appfmt buf "%s:" exit_label ;
+        Buffer.contents buf
     | istail, ExprSeq exprs ->
         String.concat "\npop rax\n"
           (List.mapi
@@ -2483,7 +2496,10 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     | _, Var varname -> (
       try
         let offset = HashMap.find varname env.varoffset in
-        String.concat "\n" [sprintf "mov rax, [rbp + %d]" offset; "push rax"]
+        let buf = Buffer.create 128 in
+        appfmt buf "mov rax, [rbp + %d]" offset ;
+        appstr buf "push rax" ;
+        Buffer.contents buf
       with Not_found ->
         failwith (sprintf "not found in code generation: %s" varname) )
     | istail, CtorApp (Some typename, ctorname, None) ->
