@@ -7,7 +7,7 @@ test: aqaml test.sh utility.o _test.ml
 utility.o: utility.c
 	gcc -Wall -std=c11 -c -o $@ $^
 
-_test.ml:
+_test.ml: stdlib.ml test.ml
 	cat stdlib.ml test.ml > $@
 
 _self_aqaml: stdlib.ml main.ml utility.o aqaml
@@ -38,4 +38,4 @@ selfself_test: _selfself_aqaml _test.ml _selfself_test.sh utility.o
 clean:
 	rm -f _test.ml _self_test.sh _self_aqaml _self_aqaml.s _test.o _test.s aqaml utility.o _selfself_aqaml _selfself_aqaml.s _selfself_test.sh
 
-.PHONY: test self_test clean
+.PHONY: test self_test clean selfself_test
