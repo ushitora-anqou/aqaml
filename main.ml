@@ -230,6 +230,7 @@ type token =
   | Downto
   | Do
   | Done
+  | PipeGT
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -315,6 +316,7 @@ let string_of_token = function
   | Downto -> "downto"
   | Do -> "do"
   | Done -> "done"
+  | PipeGT -> "|>"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -517,7 +519,7 @@ let tokenize program =
       | '!' -> aux (Exclam :: acc) i
       | '{' -> aux (LBrace :: acc) i
       | '}' -> aux (RBrace :: acc) i
-      | '|' -> switch_char i Pipe [('|', PipePipe)]
+      | '|' -> switch_char i Pipe [('|', PipePipe); ('>', PipeGT)]
       | '&' -> switch_char i Ampersand [('&', AndAnd)]
       | '@' -> switch_char i Naruto [('@', NarutoNaruto)]
       | '.' -> switch_char i Dot [('.', DotDot); ('[', DotLBracket)]
@@ -850,6 +852,14 @@ let parse tokens =
       | GT :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (LessThan (rhs, lhs)) tokens
+      | PipeGT :: tokens ->
+          let tokens, rhs = parse_string_concat tokens in
+          aux
+            ( match rhs with
+            | AppCls (func, args) ->
+                AppCls (func, List.rev (lhs :: List.rev args))
+            | _ -> AppCls (rhs, [lhs]) )
+            tokens
       | _ -> (tokens, lhs)
     in
     let tokens, ast = parse_string_concat tokens in
@@ -2922,20 +2932,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   in
   main_code ^ letfuncs_code ^ strings_code
 
-let rec eprint_token_list = function
-  | token :: tokens ->
-      eprintf "%s " (string_of_token token) ;
-      eprint_token_list tokens
-  | [] -> ()
-
 ;;
 try
-  let program = read_lines () in
-  let tokens = tokenize program in
-  (* eprint_token_list tokens ; *)
-  let asts = parse tokens in
-  let analyzed_data = analyze asts in
-  let code = generate analyzed_data in
-  print_string
-    (String.concat "\n" [".intel_syntax noprefix"; ".global main"; code])
+  read_lines () |> tokenize |> parse |> analyze |> generate
+  |> printf ".intel_syntax noprefix\n.global main\n%s"
 with Failure str -> eprintf "[AQaml Error] %s\n" @@ str

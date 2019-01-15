@@ -1627,3 +1627,10 @@ let rec pow2 n = if n = 0 then 1 else pow2 (n - 1) * 2
 
 ;;
 test (dec (pow2 20)) 0
+
+let add x y = x + y
+
+let sub x y = x - y
+
+;;
+test (10 |> add 2 |> sub 8) (-4)
