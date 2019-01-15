@@ -1916,6 +1916,11 @@ type tail_recursive = Tail | NonTail
 
 let rec generate (letfuncs, strings, typedefs, exps) =
   let stack_size = ref 0 in
+  let new_offset env size =
+    let offset = env.offset - (8 * size) in
+    stack_size := max !stack_size (-offset) ;
+    offset
+  in
   let records_idx = Hashtbl.create 16 in
   let ctors_id = Hashtbl.create 16 in
   List.iter
@@ -2039,8 +2044,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     | PtnOr (lhs, rhs) ->
         let next_label = make_label () in
         let exit_label = make_label () in
-        let saved_rsp_offset = env.offset - 8 in
-        stack_size := max !stack_size (-saved_rsp_offset) ;
+        let saved_rsp_offset = new_offset env 1 in
         let env = {env with offset= saved_rsp_offset} in
         let buf = Buffer.create 128 in
         appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
@@ -2107,8 +2111,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   and gen_pattern_match_cases env cases istail exp_body =
     (* Assume that the target value is in stack top *)
     let buf = Buffer.create 128 in
-    let saved_rsp_offset = env.offset - 8 in
-    stack_size := max !stack_size (-saved_rsp_offset) ;
+    let saved_rsp_offset = new_offset env 1 in
     let env = {env with offset= saved_rsp_offset} in
     appfmt buf "mov [rbp + %d], rsp" saved_rsp_offset ;
     let exit_label = make_label () in
@@ -2116,8 +2119,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
       List.fold_left
         (fun this_label (ptn, whn, case) ->
           let varnames = varnames_in_pattern ptn in
-          let offset = env.offset - (List.length varnames * 8) in
-          stack_size := max !stack_size (-offset) ;
+          let offset = new_offset env @@ List.length varnames in
           let env =
             { offset
             ; varoffset=
@@ -2188,8 +2190,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           ; "push rax"
           ; "/* TupleValue END */" ]
     | _, RecordValue (Some typename, fields) ->
-        let offset = env.offset - 8 in
-        stack_size := max !stack_size (-offset) ;
+        let offset = new_offset env 1 in
         let buf = Buffer.create 128 in
         appfmt buf "/* RecordValue %s BEGIN */" typename ;
         appstr buf @@ gen_alloc_block (List.length fields) 0 1 ;
@@ -2552,8 +2553,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     | _, ForLoop (dir, indexname, expr1, expr2, expr3) ->
         let loop_label = make_label () in
         let exit_label = make_label () in
-        let offset = env.offset - 8 in
-        stack_size := max !stack_size (-offset) ;
+        let offset = new_offset env 1 in
         let env' =
           {offset; varoffset= HashMap.add indexname offset env.varoffset}
         in
@@ -2589,8 +2589,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         let aux' env' = function
           | LetVar (false, bind, lhs) ->
               let varnames = varnames_in_pattern bind in
-              let offset = env'.offset - (List.length varnames * 8) in
-              stack_size := max !stack_size (-offset) ;
+              let offset = new_offset env' @@ List.length varnames in
               let env' =
                 { offset
                 ; varoffset=
@@ -2603,8 +2602,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
               appstr buf @@ gen_assign_pattern_or_raise env' bind ;
               env'
           | LetFunc (_, funcname, _, _, _) ->
-              let offset = env'.offset - 8 in
-              stack_size := max !stack_size (-offset) ;
+              let offset = new_offset env' 1 in
               let env' =
                 {offset; varoffset= HashMap.add funcname offset env'.varoffset}
               in
@@ -2642,8 +2640,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "/* MatchWith END */" ;
         Buffer.contents buf
     | istail, TryWith (cond, cases) ->
-        let offset = env.offset - 8 in
-        stack_size := max !stack_size (-offset) ;
+        let offset = new_offset env 1 in
         let env = {env with offset} in
         let exp_label = make_label () in
         let exit_label = make_label () in
