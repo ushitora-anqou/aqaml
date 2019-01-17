@@ -3,8 +3,7 @@ open Printf
 module HashMap = struct
   type ('a, 'b) t = ('a * 'b) list
 
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec empty = []
+  let empty = []
 
   let add k v m = (k, v) :: m
 
@@ -1668,6 +1667,31 @@ let analyze asts =
     | LetAnd (recursive, lhs_of_in, rhs_of_in) ->
         (* Split rhs_of_eq into LetVar and LetFunc. At the same time,
          * make a conversion table for function names *)
+        let rec bind_with_modulename = function
+          | ( IntValue _ | CharValue _ | UnitValue | EmptyList | PtnRange _
+            | StringValue _ ) as ptn ->
+              ptn
+          | TupleValue values ->
+              TupleValue (List.map (fun x -> bind_with_modulename x) values)
+          | Cons (car, cdr) ->
+              Cons (bind_with_modulename car, bind_with_modulename cdr)
+          | PtnAlias (ptn, (Var _ as var)) ->
+              PtnAlias (bind_with_modulename ptn, bind_with_modulename var)
+          | PtnOr (lhs, rhs) ->
+              PtnOr (bind_with_modulename lhs, bind_with_modulename rhs)
+          | CtorApp (None, ctorname, arg) ->
+              let arg =
+                match arg with
+                | Some arg -> Some (bind_with_modulename arg)
+                | _ -> None
+              in
+              CtorApp (None, ctorname, arg)
+          | Var name ->
+              (* This process is the key. In this function,
+               * we put the current module name to the defined variables *)
+              Var (with_modulename name)
+          | _ -> failwith "unexpected pattern"
+        in
         let funcnames2gen = Hashtbl.create 2 in
         let src =
           List.map
@@ -1689,7 +1713,13 @@ let analyze asts =
                   in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
                   LetFunc (true, funcname, [], rhs_of_eq, [])
-              | [bind], rhs_of_eq -> LetVar (recursive, bind, rhs_of_eq)
+              | [bind], rhs_of_eq ->
+                  let bind =
+                    match rhs_of_in with
+                    | None -> bind_with_modulename bind
+                    | Some _ -> bind
+                  in
+                  LetVar (recursive, bind, rhs_of_eq)
               | Var funcname :: args, rhs_of_eq ->
                   let funcname =
                     match rhs_of_in with

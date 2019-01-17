@@ -1244,8 +1244,7 @@ test (List.find (fun x -> x mod 2 = 0) [1; 2; 3; 4; 5]) 2
 module HashMap = struct
   type ('a, 'b) t = ('a * 'b) list
 
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec empty = []
+  let empty = []
 
   let add k v m = (k, v) :: m
 

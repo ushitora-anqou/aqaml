@@ -101,11 +101,9 @@ module List = struct
   let rec rev_append l1 l2 =
     match l1 with x :: xs -> rev_append xs (x :: l2) | [] -> l2
 
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec hd = function x :: xs -> x | [] -> failwith "hd"
+  let hd = function x :: xs -> x | [] -> failwith "hd"
 
-  (* TODO: this 'rec' is needed due to missing implementation *)
-  let rec tl = function x :: xs -> xs | [] -> failwith "tl"
+  let tl = function x :: xs -> xs | [] -> failwith "tl"
 
   let rec concat = function x :: xs -> x @ concat xs | [] -> []
 
