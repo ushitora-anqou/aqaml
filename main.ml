@@ -1359,8 +1359,8 @@ let analyze asts =
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
     ; records_fields= Hashtbl.create 16
-    ; modulename= []
-    ; opened_modulename= [] }
+    ; modulename= ["Pervasives"]
+    ; opened_modulename= ["Pervasives."] }
   in
   let get_current_name_prefix () =
     let buf = Buffer.create 128 in
@@ -1432,12 +1432,11 @@ let analyze asts =
         let arg =
           match arg with Some arg -> Some (aux_ptn env arg) | _ -> None
         in
-        CtorApp
-          ( Some
-              ( try Hashtbl.find toplevel.ctors_type ctorname
-                with Not_found -> Hashtbl.find toplevel.exps ctorname )
-          , ctorname
-          , arg )
+        let name_prefix, typename =
+          try hashtbl_find_with_modulename toplevel.ctors_type ctorname
+          with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
+        in
+        CtorApp (Some typename, name_prefix ^ ctorname, arg)
     | _ -> failwith "unexpected pattern"
   in
   let rec analyze_pattern_match_cases env cases =
@@ -1469,9 +1468,16 @@ let analyze asts =
               fields )
     | RecordValueWith (base, fields) ->
         let key_fieldname, _ = List.hd fields in
-        let typename = Hashtbl.find toplevel.records key_fieldname in
+        let name_prefix, typename =
+          hashtbl_find_with_modulename toplevel.records key_fieldname
+        in
         let fieldnames = Hashtbl.find toplevel.records_fields typename in
-        let fields = hashmap_of_list fields in
+        let fields =
+          hashmap_of_list
+          @@ List.map
+               (fun (fieldname, v) -> (name_prefix ^ fieldname, v))
+               fields
+        in
         let new_base = Var (make_id "var") in
         aux env
         @@ LetAnd
@@ -1556,12 +1562,11 @@ let analyze asts =
           sym
       | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
     | CtorApp (None, ctorname, None) ->
-        CtorApp
-          ( Some
-              ( try Hashtbl.find toplevel.ctors_type ctorname
-                with Not_found -> Hashtbl.find toplevel.exps ctorname )
-          , ctorname
-          , None )
+        let name_prefix, typename =
+          try hashtbl_find_with_modulename toplevel.ctors_type ctorname
+          with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
+        in
+        CtorApp (Some typename, name_prefix ^ ctorname, None)
     | TypeAnd entries ->
         toplevel.typedefs
         <- List.rev_append toplevel.typedefs
@@ -1605,8 +1610,10 @@ let analyze asts =
         toplevel.exps_list <- expname :: toplevel.exps_list ;
         Nope
     | OpenModuleDef modname ->
+        (* TODO: identify which module should be added to toplevel.opened_modulename *)
+        let modname = modname ^ "." in
         toplevel.opened_modulename
-        <- (modname ^ ".") :: toplevel.opened_modulename ;
+        <- with_modulename modname :: modname :: toplevel.opened_modulename ;
         Nope
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with
