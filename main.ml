@@ -93,8 +93,6 @@ let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '\'' | '_' -> true
   | _ -> false
 
-let append_to_list_ref x xs = xs := x :: !xs
-
 let string_of_list src = "[" ^ String.concat "; " src ^ "]"
 
 let hashmap_of_list src =
@@ -1325,15 +1323,15 @@ let add_symbols_in_patterns symbols ptns =
   @@ List.map varnames_in_pattern ptns
 
 type type_toplevel =
-  { letfuncs: ast list ref
-  ; strings: ast list ref
-  ; typedefs: typedef list ref
-  ; exps_list: string list ref
+  { mutable letfuncs: ast list
+  ; mutable strings: ast list
+  ; mutable typedefs: typedef list
+  ; mutable exps_list: string list
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
   ; records: (string, string) Hashtbl.t
   ; records_fields: (string, string list) Hashtbl.t
-  ; modulename: string list ref
+  ; mutable modulename: string list
   ; (* TODO: opened_modulename should be in type environment
    * rather than type type_toplevel, because
    * functions, exceptions, types, and etc. in the opened module
@@ -1344,7 +1342,7 @@ type type_toplevel =
    *     open ABC;;
    *     test (f ()) 5 ;; (* expect 5 but will get 3 *)
    *)
-    opened_modulename: string list ref }
+    mutable opened_modulename: string list }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1353,27 +1351,27 @@ exception LetDef of ast list * environment
 
 let analyze asts =
   let toplevel =
-    { letfuncs= ref []
-    ; strings= ref []
-    ; typedefs= ref []
-    ; exps_list= ref []
+    { letfuncs= []
+    ; strings= []
+    ; typedefs= []
+    ; exps_list= []
     ; ctors_type= Hashtbl.create 16
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
     ; records_fields= Hashtbl.create 16
-    ; modulename= ref []
-    ; opened_modulename= ref [] }
+    ; modulename= []
+    ; opened_modulename= [] }
   in
   let get_current_name_prefix () =
     let buf = Buffer.create 128 in
     List.iter (fun modname ->
         Buffer.add_string buf modname ;
         Buffer.add_char buf '.' )
-    @@ List.rev @@ !(toplevel.modulename) ;
+    @@ List.rev @@ toplevel.modulename ;
     Buffer.contents buf
   in
   let with_modulename name =
-    String.concat "." @@ List.rev @@ (name :: !(toplevel.modulename))
+    String.concat "." @@ List.rev @@ (name :: toplevel.modulename)
   in
   let exprs2expr = function
     | [] -> Nope
@@ -1389,7 +1387,7 @@ let analyze asts =
         let modname =
           List.find
             (fun modname -> Hashtbl.mem hashtbl (modname ^ name))
-            !(toplevel.opened_modulename)
+            toplevel.opened_modulename
         in
         (modname, Hashtbl.find hashtbl (modname ^ name)) )
   in
@@ -1399,7 +1397,7 @@ let analyze asts =
         let modname =
           List.find
             (fun modname -> HashMap.mem (modname ^ name) hashmap)
-            !(toplevel.opened_modulename)
+            toplevel.opened_modulename
         in
         HashMap.find (modname ^ name) hashmap )
   in
@@ -1418,7 +1416,7 @@ let analyze asts =
     match ptn with
     | IntValue _ | CharValue _ | UnitValue | EmptyList | PtnRange _ -> ptn
     | StringValue _ ->
-        append_to_list_ref ptn toplevel.strings ;
+        toplevel.strings <- ptn :: toplevel.strings ;
         ptn
     | TupleValue values ->
         TupleValue (List.map (fun x -> aux_ptn env x) values)
@@ -1456,7 +1454,7 @@ let analyze asts =
     match ast with
     | IntValue _ | CharValue _ | UnitValue | EmptyList -> ast
     | StringValue _ ->
-        append_to_list_ref ast toplevel.strings ;
+        toplevel.strings <- ast :: toplevel.strings ;
         ast
     | TupleValue values -> TupleValue (List.map (fun x -> aux env x) values)
     | RecordValue (None, fields) ->
@@ -1565,50 +1563,50 @@ let analyze asts =
           , ctorname
           , None )
     | TypeAnd entries ->
-        toplevel.typedefs :=
-          List.rev_append !(toplevel.typedefs)
-          @@ List.map
-               (function
-                 | DefTypeAlias (type_param, typename, typ) ->
-                     let typename = with_modulename typename in
-                     DefTypeAlias (type_param, typename, typ)
-                 | DefVariant (type_param, typename, ctornames) ->
-                     let typename = with_modulename typename in
-                     let ctornames =
-                       List.map
-                         (fun (ctorname, typexpr) ->
-                           (with_modulename ctorname, typexpr) )
-                         ctornames
-                     in
-                     List.iter
-                       (fun (ctorname, _) ->
-                         Hashtbl.add toplevel.ctors_type ctorname typename )
-                       ctornames ;
-                     DefVariant (type_param, typename, ctornames)
-                 | DefRecord (typename, fields) ->
-                     let typename = with_modulename typename in
-                     let fields =
-                       List.map
-                         (fun (fieldname, typexpr) ->
-                           (with_modulename fieldname, typexpr) )
-                         fields
-                     in
-                     List.iter
-                       (fun (fieldname, _) ->
-                         Hashtbl.add toplevel.records fieldname typename )
-                       fields ;
-                     Hashtbl.add toplevel.records_fields typename
-                     @@ List.map (fun (fieldname, _) -> fieldname) fields ;
-                     DefRecord (typename, fields))
-               entries ;
+        toplevel.typedefs
+        <- List.rev_append toplevel.typedefs
+           @@ List.map
+                (function
+                  | DefTypeAlias (type_param, typename, typ) ->
+                      let typename = with_modulename typename in
+                      DefTypeAlias (type_param, typename, typ)
+                  | DefVariant (type_param, typename, ctornames) ->
+                      let typename = with_modulename typename in
+                      let ctornames =
+                        List.map
+                          (fun (ctorname, typexpr) ->
+                            (with_modulename ctorname, typexpr) )
+                          ctornames
+                      in
+                      List.iter
+                        (fun (ctorname, _) ->
+                          Hashtbl.add toplevel.ctors_type ctorname typename )
+                        ctornames ;
+                      DefVariant (type_param, typename, ctornames)
+                  | DefRecord (typename, fields) ->
+                      let typename = with_modulename typename in
+                      let fields =
+                        List.map
+                          (fun (fieldname, typexpr) ->
+                            (with_modulename fieldname, typexpr) )
+                          fields
+                      in
+                      List.iter
+                        (fun (fieldname, _) ->
+                          Hashtbl.add toplevel.records fieldname typename )
+                        fields ;
+                      Hashtbl.add toplevel.records_fields typename
+                      @@ List.map (fun (fieldname, _) -> fieldname) fields ;
+                      DefRecord (typename, fields))
+                entries ;
         Nope
     | ExpDef (expname, components) ->
         Hashtbl.add toplevel.exps expname expname ;
-        toplevel.exps_list := expname :: !(toplevel.exps_list) ;
+        toplevel.exps_list <- expname :: toplevel.exps_list ;
         Nope
     | OpenModuleDef modname ->
-        toplevel.opened_modulename :=
-          (modname ^ ".") :: !(toplevel.opened_modulename) ;
+        toplevel.opened_modulename
+        <- (modname ^ ".") :: toplevel.opened_modulename ;
         Nope
     | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with
@@ -1742,8 +1740,8 @@ let analyze asts =
         let let_closures_freevars = ref [] in
         let should_be_closure = ref false in
         let rec analyze_lets first =
-          let toplevel_letfuncs_backup = !(toplevel.letfuncs) in
-          let toplevel_strings_backup = !(toplevel.strings) in
+          let toplevel_letfuncs_backup = toplevel.letfuncs in
+          let toplevel_strings_backup = toplevel.strings in
           let funcvars =
             hashmap_of_list
             @@ filter_after_map
@@ -1841,7 +1839,7 @@ let analyze asts =
                       , func
                       , [] )
                   in
-                  append_to_list_ref ast toplevel.letfuncs ;
+                  toplevel.letfuncs <- ast :: toplevel.letfuncs ;
                   (env_out, ast) )
                 else
                   (* closure *)
@@ -1858,7 +1856,7 @@ let analyze asts =
                       , func
                       , !freevars )
                   in
-                  append_to_list_ref ast toplevel.letfuncs ;
+                  toplevel.letfuncs <- ast :: toplevel.letfuncs ;
                   ( env_out
                   , LetVar
                       ( false
@@ -1883,8 +1881,8 @@ let analyze asts =
               (env, []) src
           in
           if first && !should_be_closure then (
-            toplevel.letfuncs := toplevel_letfuncs_backup ;
-            toplevel.strings := toplevel_strings_backup ;
+            toplevel.letfuncs <- toplevel_letfuncs_backup ;
+            toplevel.strings <- toplevel_strings_backup ;
             let_closures_freevars := list_unique !let_closures_freevars ;
             analyze_lets false )
           else
@@ -1898,11 +1896,11 @@ let analyze asts =
     let toplevel_env = ref env in
     let rec aux' exprs = function
       | ModuleDef (this_modulename, body) :: asts ->
-          toplevel.modulename := this_modulename :: !(toplevel.modulename) ;
+          toplevel.modulename <- this_modulename :: toplevel.modulename ;
           (* TODO: is there any better way? *)
           aux' exprs @@ body @ (ModuleDefEnd :: asts)
       | ModuleDefEnd :: asts ->
-          toplevel.modulename := List.tl !(toplevel.modulename) ;
+          toplevel.modulename <- List.tl toplevel.modulename ;
           aux' exprs asts
       | ExternalDecl (id, typexpr, decl) :: asts ->
           let id = with_modulename id in
@@ -1932,11 +1930,8 @@ let analyze asts =
   let env = {symbols= HashMap.empty; parent= None; freevars= ref []} in
   let _, ast = analyze_module env asts in
   let ast = LetFunc (false, "aqaml_main", [UnitValue], ast, []) in
-  append_to_list_ref ast toplevel.letfuncs ;
-  ( !(toplevel.letfuncs)
-  , !(toplevel.strings)
-  , !(toplevel.typedefs)
-  , !(toplevel.exps_list) )
+  toplevel.letfuncs <- ast :: toplevel.letfuncs ;
+  (toplevel.letfuncs, toplevel.strings, toplevel.typedefs, toplevel.exps_list)
 
 type gen_environment = {offset: int; varoffset: (string, int) HashMap.t}
 
