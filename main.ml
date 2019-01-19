@@ -2864,6 +2864,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_printf_ksprintf5"
       [CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr; CTyPtr]
       CTyPtr ;
+    gen_c_func "aqaml_get_stdin" [CTyUnit] CTyPtr ;
+    gen_c_func "aqaml_close_in" [CTyPtr] CTyUnit ;
     appstr buf "aqaml_input_char:" ;
     let exit_label = make_label () in
     appstr buf "mov rdi, rax" ;
@@ -2871,6 +2873,18 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "cmp rax, -1" ;
     appfmt buf "jne %s" exit_label ;
     appstr buf @@ gen_raise_exp_of "End_of_file" false ;
+    appfmt buf "%s:" exit_label ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf "aqaml_open_in:" ;
+    let exit_label = make_label () in
+    appstr buf "mov rdi, rax" ;
+    appstr buf "call aqaml_open_in_detail@PLT" ;
+    appstr buf "cmp rax, 0" ;
+    appfmt buf "jne %s" exit_label ;
+    (* TODO: raise 'No such file or directory *)
+    appstr buf "mov rax, 0" ;
+    appstr buf @@ gen_raise_exp_of "Sys_error" true ;
     appfmt buf "%s:" exit_label ;
     appstr buf "ret" ;
     appstr buf "" ;

@@ -20,11 +20,19 @@ exception Not_found
 
 exception Failure of string
 
+exception Sys_error of string
+
 type in_channel = {descriptor: int}
 
-let stdin = {descriptor= 0}
+external _aqaml_get_stdin : unit -> in_channel = "aqaml_get_stdin"
+
+let stdin = _aqaml_get_stdin ()
 
 external input_char : in_channel -> char = "aqaml_input_char"
+
+external open_in : string -> in_channel = "aqaml_open_in"
+
+external close_in : string -> in_channel = "aqaml_close_in"
 
 type 'a option = Some of 'a | None
 

@@ -1633,3 +1633,9 @@ let sub x y = x - y
 
 ;;
 test (10 |> add 2 |> sub 8) (-4)
+
+;;
+let ch = open_in "test.ml" in
+test (input_char ch) 'l' ;
+test (input_char ch) 'e' ;
+close_in ch

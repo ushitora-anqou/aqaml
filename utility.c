@@ -207,13 +207,40 @@ void aqaml_prerr_string_detail(uint64_t ptr)
     for (uint64_t i = 0; i < length; i++) fputc(val.string->str[i], stderr);
 }
 
+uint64_t aqaml_open_in_detail(uint64_t path_src)
+{
+    AQamlValue path = get_value(path_src);
+    assert(path.kind == AQAML_STRING);
+    FILE *fp = fopen((char *)(path.string->str), "r");
+    if (fp == NULL) return 0;
+    uint64_t ret_src = aqaml_alloc_block(1, 0, 247);
+    AQamlValue ret = get_value(ret_src);
+    ret.array->data[0] = (uint64_t)fp;
+    return ret_src;
+}
+
+void aqaml_close_in_detail(uint64_t chan_src)
+{
+    AQamlValue chan = get_value(chan_src);
+    assert(chan.kind == AQAML_ARRAY);
+    FILE *fp = (FILE *)(chan.array->data[0]);
+    fclose(fp);
+}
+
+uint64_t aqaml_get_stdin_detail()
+{
+    uint64_t ret_src = aqaml_alloc_block(1, 0, 247);
+    AQamlValue ret = get_value(ret_src);
+    ret.array->data[0] = (uint64_t)stdin;
+    return ret_src;
+}
+
 uint64_t aqaml_input_char_detail(uint64_t ptr)
 {
     AQamlValue chan = get_value(ptr);
     assert(chan.kind == AQAML_ARRAY);
-    uint64_t fd = chan.array->data[0] >> 1;
-    assert(fd == 0);  // TODO: other in_channel
-    int ch = fgetc(stdin);
+    FILE *fp = (FILE *)(chan.array->data[0]);
+    int ch = fgetc(fp);
     if (ch == EOF) return -1;
     return ((uint64_t)ch << 1) | 1;
 }
