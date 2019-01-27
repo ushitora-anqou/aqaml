@@ -63,11 +63,11 @@ Thank you very much. You can contribute to AQaml for example
 by creating a pull request or an issue. I will be happy if
 you attach a minimal example code to reproduce that bug.
 
-## What is 'Naruto'?
+## What is ['Naruto'](https://github.com/ushitora-anqou/aqaml/blob/911ae591e29d3ca10733b44fbabb442dd80b2dc0/main.ml#L199)?
 
 It's a nerimono.
 
-## What is 'NarutoNaruto'?
+## What is ['NarutoNaruto'](https://github.com/ushitora-anqou/aqaml/blob/911ae591e29d3ca10733b44fbabb442dd80b2dc0/main.ml#L215)?
 
 It's a nerimononerimono.
 
