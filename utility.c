@@ -533,3 +533,10 @@ uint64_t aqaml_appcls_detail(uint64_t nargs, uint64_t cls_src, uint64_t *args)
         cls_src = ret;
     }
 }
+
+uint64_t aqaml_array_get_detail(uint64_t ary_src, uint64_t idx)
+{
+    AQamlValue ary = get_value(ary_src);
+    assert(ary.kind == AQAML_ARRAY);
+    return ary.array->data[idx];
+}

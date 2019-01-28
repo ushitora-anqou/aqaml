@@ -206,6 +206,7 @@ type token =
   | Lsr
   | Asr
   | DotLBracket
+  | DotLParen
   | Colon
   | LBrace
   | RBrace
@@ -228,6 +229,8 @@ type token =
   | Do
   | Done
   | PipeGT
+  | LBracketBar
+  | BarRBracket
 
 let string_of_token = function
   | IntLiteral num -> string_of_int num
@@ -292,6 +295,7 @@ let string_of_token = function
   | Lsr -> "lsr"
   | Asr -> "asr"
   | DotLBracket -> ".["
+  | DotLParen -> ".("
   | Colon -> ":"
   | LBrace -> "{"
   | RBrace -> "}"
@@ -314,6 +318,8 @@ let string_of_token = function
   | Do -> "do"
   | Done -> "done"
   | PipeGT -> "|>"
+  | LBracketBar -> "[|"
+  | BarRBracket -> "|]"
 
 let raise_unexpected_token = function
   | x :: _ ->
@@ -516,13 +522,17 @@ let tokenize program =
       | '!' -> aux (Exclam :: acc) i
       | '{' -> aux (LBrace :: acc) i
       | '}' -> aux (RBrace :: acc) i
-      | '|' -> switch_char i Pipe [('|', PipePipe); ('>', PipeGT)]
+      | '|' ->
+          switch_char i Pipe
+            [('|', PipePipe); ('>', PipeGT); (']', BarRBracket)]
       | '&' -> switch_char i Ampersand [('&', AndAnd)]
       | '@' -> switch_char i Naruto [('@', NarutoNaruto)]
-      | '.' -> switch_char i Dot [('.', DotDot); ('[', DotLBracket)]
+      | '.' ->
+          switch_char i Dot
+            [('.', DotDot); ('[', DotLBracket); ('(', DotLParen)]
       | '-' -> switch_char i Minus [('>', Arrow)]
       | '<' -> switch_char i LT [('>', LTGT); ('-', LArrow)]
-      | '[' -> switch_char i LBracket [(']', LRBracket)]
+      | '[' -> switch_char i LBracket [(']', LRBracket); ('|', LBracketBar)]
       | ':' -> switch_char i Colon [(':', ColonColon); ('=', ColonEqual)]
       | ';' -> switch_char i Semicolon [(';', SemicolonSemicolon)]
       | '(' -> (
@@ -555,6 +565,7 @@ type ast =
   | CharValue of char
   | StringValue of string * string
   | TupleValue of ast list
+  | ArrayValue of ast list
   | RecordValue of string option * (string * ast) list
   | RecordValueWith of ast * (string * ast) list
   | RecordDotAccess of string option * ast * string
@@ -603,6 +614,7 @@ type ast =
   | TryWith of ast * (pattern * ast option * ast) list
   | StringGet of ast * ast
   | StringSet of ast * ast * ast
+  | ArrayGet of ast * ast
   | ForLoop of for_loop_dir * string * ast * ast * ast
   | Nope
   | ModuleDef of string * ast list
@@ -654,7 +666,10 @@ let parse tokens =
         true
     | _ -> false
   in
-  let is_dot = function (Dot | DotLBracket) :: _ -> true | _ -> false in
+  let is_dot = function
+    | (Dot | DotLBracket | DotLParen) :: _ -> true
+    | _ -> false
+  in
   let is_prefix = function Exclam :: _ -> true | _ -> false in
   let is_let = function
     | (Function | Fun | Match | Try | Let) :: _ -> true
@@ -677,6 +692,16 @@ let parse tokens =
         match tokens with
         | RParen :: tokens -> (tokens, ast)
         | x -> raise_unexpected_token x )
+    | LBracketBar :: tokens ->
+        let rec aux lst = function
+          | Semicolon :: tokens ->
+              let tokens, item = parse_let tokens in
+              aux (item :: lst) tokens
+          | BarRBracket :: tokens -> (tokens, ArrayValue (List.rev lst))
+          | x -> raise_unexpected_token x
+        in
+        let tokens, item = parse_let tokens in
+        aux [item] tokens
     | LBracket :: tokens ->
         let rec aux = function
           | Semicolon :: tokens ->
@@ -737,6 +762,11 @@ let parse tokens =
         let tokens, rhs = parse_expression tokens in
         match tokens with
         | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
+        | x -> raise_unexpected_token x )
+    | DotLParen :: tokens -> (
+        let tokens, rhs = parse_expression tokens in
+        match tokens with
+        | RParen :: tokens -> (tokens, ArrayGet (lhs, rhs))
         | x -> raise_unexpected_token x )
     | _ -> (tokens, lhs)
   and parse_funccall tokens =
@@ -1456,6 +1486,7 @@ let analyze asts =
         toplevel.strings <- ast :: toplevel.strings ;
         ast
     | TupleValue values -> TupleValue (List.map (fun x -> aux env x) values)
+    | ArrayValue values -> ArrayValue (List.map (fun x -> aux env x) values)
     | RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
         let name_prefix, typename =
@@ -1544,6 +1575,10 @@ let analyze asts =
         aux env @@ AppCls (Var "String.get", [str; idx])
     | StringSet (str, idx, ast) ->
         aux env @@ AppCls (Var "String.set", [str; idx; ast])
+    | ArrayGet (ary, idx) ->
+        (* a.(b) returns b-th item of array a.
+         * Therefore, convert it to Array.get call *)
+        aux env @@ AppCls (Var "Array.get", [ary; idx])
     | TryWith (cond, cases) ->
         TryWith (aux env cond, analyze_pattern_match_cases env cases)
     | MatchWith (cond, cases) ->
@@ -1972,18 +2007,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   List.iter
     (fun expname -> Hashtbl.add exps_id expname @@ Hashtbl.length exps_id)
     exps ;
-  let reg_of_index = function
-    | 0 -> "rax"
-    | 1 -> "rbx"
-    | 2 -> "rdi"
-    | 3 -> "rsi"
-    | 4 -> "rdx"
-    | 5 -> "rcx"
-    | 6 -> "r8"
-    | 7 -> "r9"
-    | 8 -> "r12"
-    | 9 -> "r13"
-    | _ -> failwith "out-of-bound register"
+  let reg_of_index idx =
+    [|"rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9"; "r12"; "r13"|].(idx)
   in
   let tag_int reg = sprintf "lea %s, [%s + %s + 1]" reg reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
@@ -2211,7 +2236,6 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appstr buf "/* Cons END */" ;
         Buffer.contents buf
     | _, TupleValue values ->
-        (* +1 for header *)
         let size = List.length values in
         let buf = Buffer.create 128 in
         appstr buf @@ "/* TupleValue BEGIN */" ;
@@ -2224,6 +2248,20 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           values ;
         appstr buf @@ "push rax" ;
         appstr buf @@ "/* TupleValue END */" ;
+        Buffer.contents buf
+    | _, ArrayValue values ->
+        let size = List.length values in
+        let buf = Buffer.create 128 in
+        appstr buf @@ "/* ArrayValue BEGIN */" ;
+        List.iter
+          (fun x -> appstr buf @@ aux env (NonTail, x))
+          (List.rev values) ;
+        appstr buf @@ gen_alloc_block size 0 1 ;
+        List.iteri
+          (fun i _ -> appfmt buf "pop rdi\nmov [rax + %d], rdi" (i * 8))
+          values ;
+        appstr buf @@ "push rax" ;
+        appstr buf @@ "/* ArrayValue END */" ;
         Buffer.contents buf
     | _, RecordValue (Some typename, fields) ->
         let offset = new_offset env 1 in
@@ -2842,6 +2880,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_string_length" [CTyPtr] CTyInt ;
     gen_c_func "aqaml_string_get" [CTyPtr; CTyInt] CTyInt ;
     gen_c_func "aqaml_string_set" [CTyPtr; CTyInt; CTyInt] CTyInt ;
+    gen_c_func "aqaml_array_get" [CTyPtr; CTyInt] CTyPtr ;
     gen_c_func "aqaml_string_create" [CTyInt] CTyPtr ;
     gen_c_func "aqaml_string_blit"
       [CTyPtr; CTyInt; CTyPtr; CTyInt; CTyInt]

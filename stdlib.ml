@@ -206,6 +206,10 @@ module Printf = struct
   let eprintf fmt = ksprintf (fun str -> prerr_string str) fmt
 end
 
+module Array = struct
+  external get : 'a array -> int -> 'a = "aqaml_array_get"
+end
+
 let read_line () =
   let buf = Buffer.create 65 in
   let rec aux () =

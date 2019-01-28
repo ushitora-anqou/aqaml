@@ -1639,3 +1639,8 @@ let ch = open_in "test.ml" in
 test (input_char ch) 'l' ;
 test (input_char ch) 'e' ;
 close_in ch
+
+;;
+let ary = [|1; 2; 3|] in
+test ary.(1) 2 ;
+test ((ary.(1) * 2) + 3) 7
