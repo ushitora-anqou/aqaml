@@ -1379,7 +1379,8 @@ type type_toplevel =
    *     open ABC;;
    *     test (f ()) 5 ;; (* expect 5 but will get 3 *)
    *)
-    mutable opened_modulename: string list }
+    mutable opened_modulename: string list
+  ; mutable modules: (string, string) Hashtbl.t }
 
 (* Used in analysis of LetAnd *)
 exception Should_be_closure
@@ -1397,7 +1398,8 @@ let analyze asts =
     ; records= Hashtbl.create 16
     ; records_fields= Hashtbl.create 16
     ; modulename= ["Pervasives"]
-    ; opened_modulename= ["Pervasives."] }
+    ; opened_modulename= ["Pervasives."]
+    ; modules= Hashtbl.create 16 }
   in
   let with_modulename name =
     String.concat "." @@ List.rev @@ (name :: toplevel.modulename)
@@ -1407,19 +1409,19 @@ let analyze asts =
     | [expr] -> expr
     | exprs -> ExprSeq exprs
   in
+  let get_modulename_prefix modulename =
+    let buf = Buffer.create 128 in
+    List.iter (fun modname ->
+        Buffer.add_string buf modname ;
+        Buffer.add_char buf '.' )
+    @@ List.rev @@ modulename ;
+    Buffer.contents buf
+  in
   let find_with_modulename find name =
     try ("", find name) with Not_found -> (
       try
-        let get_prefix modulename =
-          let buf = Buffer.create 128 in
-          List.iter (fun modname ->
-              Buffer.add_string buf modname ;
-              Buffer.add_char buf '.' )
-          @@ List.rev @@ modulename ;
-          Buffer.contents buf
-        in
         let rec aux modulename =
-          let prefix = get_prefix modulename in
+          let prefix = get_modulename_prefix modulename in
           try (prefix, find (prefix ^ name)) with Not_found -> (
             match modulename with _ :: xs -> aux xs | [] -> raise Not_found )
         in
@@ -1654,8 +1656,9 @@ let analyze asts =
         toplevel.exps_list <- expname :: toplevel.exps_list ;
         Nope
     | OpenModuleDef modname ->
-        (* TODO: identify which module should be added to toplevel.opened_modulename *)
-        let modname = modname ^ "." in
+        let _, modname =
+          hashtbl_find_with_modulename toplevel.modules (modname ^ ".")
+        in
         toplevel.opened_modulename
         <- with_modulename modname :: modname :: toplevel.opened_modulename ;
         Nope
@@ -1951,6 +1954,8 @@ let analyze asts =
           (* TODO: is there any better way? *)
           aux' exprs @@ body @ (ModuleDefEnd :: asts)
       | ModuleDefEnd :: asts ->
+          let full_modname = get_modulename_prefix toplevel.modulename in
+          Hashtbl.add toplevel.modules full_modname full_modname ;
           toplevel.modulename <- List.tl toplevel.modulename ;
           aux' exprs asts
       | ExternalDecl (id, typexpr, decl) :: asts ->
