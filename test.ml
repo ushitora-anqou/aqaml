@@ -886,8 +886,6 @@ let isVeggieDish = function
 in
 test (isVeggieDish (Rice Katsuo)) false
 
-type 'a option = Some of 'a | None
-
 ;;
 let div x y = if y = 0 then None else Some (x / y) in
 test (div 12 3) (Some 4) ;
@@ -1419,17 +1417,17 @@ test (try digit '\n' with Failure _ -> -1) (-1)
 type test_for_func_type = Value of int | Func of (int -> int)
 
 ;;
-let str = Bytes.of_string "debug" in
-test str @@ Bytes.of_string "debug" ;
+let str = Bytes.unsafe_of_string "debug" in
+test str @@ Bytes.unsafe_of_string "debug" ;
 str.[2] <- 'a' ;
-test str @@ Bytes.of_string "deaug"
+test str @@ Bytes.unsafe_of_string "deaug"
 
 ;;
 let src = "abcd" in
-let dst = Bytes.of_string "def  " in
+let dst = Bytes.unsafe_of_string "def  " in
 String.blit src 1 dst 2 3 ;
 test src "abcd" ;
-test dst @@ Bytes.of_string "debcd"
+test dst @@ Bytes.unsafe_of_string "debcd"
 
 ;;
 let src = "abcd" in
@@ -1437,7 +1435,7 @@ let dst = Bytes.create 5 in
 dst.[0] <- 'd' ;
 dst.[1] <- 'e' ;
 String.blit src 1 dst 2 3 ;
-test dst @@ Bytes.of_string "debcd"
+test dst @@ Bytes.unsafe_of_string "debcd"
 
 type testrecord2 =
   {mutable testrecord2_int: int; mutable testrecord2_str: string}

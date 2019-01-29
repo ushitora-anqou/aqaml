@@ -1,71 +1,5 @@
 open Printf
 
-module HashMap = struct
-  type ('a, 'b) t = ('a * 'b) list
-
-  let empty = []
-
-  let add k v m = (k, v) :: m
-
-  let rec find k = function
-    | (k', v') :: xs -> if k = k' then v' else find k xs
-    | [] -> raise Not_found
-
-  let mem k m =
-    try
-      ignore (find k m) ;
-      true
-    with Not_found -> false
-
-  let merge f m1 m2 =
-    let src = ref empty in
-    let rec iter_m1 = function
-      | (k, v) :: xs ->
-          ( try src := add k (Some v, Some (find k m2)) !src
-            with Not_found -> src := add k (Some v, None) !src ) ;
-          iter_m1 xs
-      | [] -> ()
-    in
-    let rec iter_m2 = function
-      | (k, v) :: xs ->
-          if not (mem k m1) then src := add k (None, Some v) !src ;
-          iter_m2 xs
-      | [] -> ()
-    in
-    iter_m1 m1 ;
-    iter_m2 m2 ;
-    List.fold_left
-      (fun m (k, (l, r)) ->
-        match f k l r with None -> m | Some v -> add k v m )
-      empty !src
-
-  let union f m1 m2 =
-    merge
-      (fun k l r ->
-        match (l, r) with
-        | None, None -> None
-        | Some v, None -> l
-        | None, Some v -> r
-        | Some v1, Some v2 -> f k v1 v2 )
-      m1 m2
-
-  let cardinal m = List.length m
-end
-
-module Hashtbl = struct
-  type ('a, 'b) t = ('a, 'b) HashMap.t ref
-
-  let create size_hint = ref HashMap.empty
-
-  let add tbl k v = tbl := HashMap.add k v !tbl
-
-  let mem tbl k = HashMap.mem k !tbl
-
-  let find tbl k = HashMap.find k !tbl
-
-  let length tbl = HashMap.cardinal !tbl
-end
-
 let filter_after_map f lst =
   List.map (function Some x -> x | None -> failwith "invalid op")
   @@ List.filter (function Some x -> true | None -> false)
@@ -96,20 +30,11 @@ let is_ident_char = function
 let string_of_list src = "[" ^ String.concat "; " src ^ "]"
 
 let hashmap_of_list src =
-  let hashmap = ref HashMap.empty in
-  List.iter (fun (k, v) -> hashmap := HashMap.add k v !hashmap) src ;
+  let hashmap = ref Hashmap.empty in
+  List.iter (fun (k, v) -> hashmap := Hashmap.add k v !hashmap) src ;
   !hashmap
 
-let integrate od nw = HashMap.union (fun _ _ r -> Some r) od nw
-
-let read_lines () =
-  let rec aux lines =
-    try
-      let line = read_line () in
-      aux (line :: lines)
-    with End_of_file -> lines
-  in
-  String.concat "\n" (List.rev (aux []))
+let integrate od nw = Hashmap.union (fun _ _ r -> Some r) od nw
 
 let appfmt buf fmt =
   ksprintf (fun str -> Buffer.add_string buf (str ^ "\n")) fmt
@@ -1344,7 +1269,7 @@ let parse tokens =
   parse_expressions_and_definitions tokens
 
 type environment =
-  { symbols: (string, ast) HashMap.t
+  { symbols: (string, ast) Hashmap.t
   ; parent: environment option
   ; freevars: (string * string) list ref }
 
@@ -1397,8 +1322,8 @@ let analyze asts =
     ; exps= Hashtbl.create 16
     ; records= Hashtbl.create 16
     ; records_fields= Hashtbl.create 16
-    ; modulename= ["Pervasives"]
-    ; opened_modulename= ["Pervasives."]
+    ; modulename= []
+    ; opened_modulename= ["Stdlib."]
     ; modules= Hashtbl.create 16 }
   in
   let with_modulename name =
@@ -1439,7 +1364,7 @@ let analyze asts =
     find_with_modulename (fun x -> Hashtbl.find hashtbl x) name
   in
   let hashmap_find_with_modulename name hashmap =
-    let _, res = find_with_modulename (fun x -> HashMap.find x hashmap) name in
+    let _, res = find_with_modulename (fun x -> Hashmap.find x hashmap) name in
     res
   in
   let find_symbol env name =
@@ -1530,7 +1455,7 @@ let analyze asts =
                     ( None
                     , List.map
                         (fun fieldname ->
-                          try (fieldname, HashMap.find fieldname fields)
+                          try (fieldname, Hashmap.find fieldname fields)
                           with Not_found ->
                             ( fieldname
                             , RecordDotAccess (None, new_base, fieldname) ) )
@@ -1710,7 +1635,7 @@ let analyze asts =
         let gen_indexname = make_id indexname in
         let env' =
           { env with
-            symbols= HashMap.add indexname (Var gen_indexname) env.symbols }
+            symbols= Hashmap.add indexname (Var gen_indexname) env.symbols }
         in
         let expr1 = aux env expr1 in
         let expr2 = aux env expr2 in
@@ -1820,7 +1745,7 @@ let analyze asts =
             | LetFunc (recursive, funcname, args, func, _) ->
                 let gen_funcname = Hashtbl.find funcnames2gen funcname in
                 let env_in =
-                  { symbols= add_symbols_in_patterns HashMap.empty args
+                  { symbols= add_symbols_in_patterns Hashmap.empty args
                   ; parent= Some env
                   ; freevars= ref [] }
                 in
@@ -1881,7 +1806,7 @@ let analyze asts =
                   let env_out =
                     { env' with
                       symbols=
-                        HashMap.add funcname
+                        Hashmap.add funcname
                           (FuncVar (gen_funcname, List.length args))
                           env'.symbols }
                   in
@@ -1900,7 +1825,7 @@ let analyze asts =
                   let funcvar = Var gen_funcname in
                   let env_out =
                     { env' with
-                      symbols= HashMap.add funcname funcvar env'.symbols }
+                      symbols= Hashmap.add funcname funcvar env'.symbols }
                   in
                   let ast =
                     LetFunc
@@ -1970,7 +1895,7 @@ let analyze asts =
           toplevel_env :=
             { !toplevel_env with
               symbols=
-                HashMap.add id (FuncVar (decl, nargs)) !toplevel_env.symbols } ;
+                Hashmap.add id (FuncVar (decl, nargs)) !toplevel_env.symbols } ;
           aux' exprs asts
       | ast :: asts -> (
         try aux' (aux !toplevel_env ast :: exprs) asts
@@ -1983,13 +1908,13 @@ let analyze asts =
     let ast = aux' [] exprs in
     (!toplevel_env, ast)
   in
-  let env = {symbols= HashMap.empty; parent= None; freevars= ref []} in
+  let env = {symbols= Hashmap.empty; parent= None; freevars= ref []} in
   let _, ast = analyze_module env asts in
   let ast = LetFunc (false, "aqaml_main", [UnitValue], ast, []) in
   toplevel.letfuncs <- ast :: toplevel.letfuncs ;
   (toplevel.letfuncs, toplevel.strings, toplevel.typedefs, toplevel.exps_list)
 
-type gen_environment = {offset: int; varoffset: (string, int) HashMap.t}
+type gen_environment = {offset: int; varoffset: (string, int) Hashmap.t}
 
 type ctype = CTyInt | CTyUnit | CTyPtr
 
@@ -2059,7 +1984,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         Buffer.contents buf
     | Var varname ->
         let buf = Buffer.create 128 in
-        let offset = HashMap.find varname env.varoffset in
+        let offset = Hashmap.find varname env.varoffset in
         appstr buf "pop rax" ;
         appfmt buf "mov [rbp + %d], rax" offset ;
         Buffer.contents buf
@@ -2108,7 +2033,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         Buffer.contents buf
     | PtnAlias (ptn, Var varname) ->
         let buf = Buffer.create 128 in
-        let offset = HashMap.find varname env.varoffset in
+        let offset = Hashmap.find varname env.varoffset in
         appstr buf "pop rax" ;
         appfmt buf "mov [rbp + %d], rax" offset ;
         appstr buf "push rax" ;
@@ -2199,7 +2124,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                 (let rec aux i varoffset = function
                    | varname :: varnames ->
                        aux (i + 1)
-                         (HashMap.add varname (env.offset - (i * 8)) varoffset)
+                         (Hashmap.add varname (env.offset - (i * 8)) varoffset)
                          varnames
                    | [] -> varoffset
                  in
@@ -2579,7 +2504,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
              exprs)
     | _, Var varname -> (
       try
-        let offset = HashMap.find varname env.varoffset in
+        let offset = Hashmap.find varname env.varoffset in
         let buf = Buffer.create 128 in
         appfmt buf "mov rax, [rbp + %d]" offset ;
         appstr buf "push rax" ;
@@ -2655,7 +2580,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         let exit_label = make_label () in
         let offset = new_offset env 1 in
         let env' =
-          {offset; varoffset= HashMap.add indexname offset env.varoffset}
+          {offset; varoffset= Hashmap.add indexname offset env.varoffset}
         in
         let buf = Buffer.create 128 in
         appstr buf @@ aux env (NonTail, expr2) ;
@@ -2704,7 +2629,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           | LetFunc (_, funcname, _, _, _) ->
               let offset = new_offset env' 1 in
               let env' =
-                {offset; varoffset= HashMap.add funcname offset env'.varoffset}
+                {offset; varoffset= Hashmap.add funcname offset env'.varoffset}
               in
               env'
           | _ -> raise Unexpected_ast
@@ -2720,7 +2645,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         appfmt buf "mov QWORD PTR [rax + 8], %d" @@ nargs ;
         List.iteri
           (fun i var ->
-            let offset = HashMap.find var env.varoffset in
+            let offset = Hashmap.find var env.varoffset in
             appfmt buf "mov rdi, [rbp + %d]" offset ;
             appfmt buf "mov [rax + %d], rdi" ((i + 2) * 8) )
           freevars ;
@@ -2803,7 +2728,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                let env =
                  { offset= List.length varnames * -8
                  ; varoffset=
-                     integrate HashMap.empty @@ hashmap_of_list
+                     integrate Hashmap.empty @@ hashmap_of_list
                      @@ List.mapi (fun i arg -> (arg, -8 * (i + 1))) varnames
                  }
                in
@@ -2847,7 +2772,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
                    (fun i var ->
                      appfmt buf "mov rdi, [rax + %d]" (i * 8) ;
                      appfmt buf "mov [rbp + %d], rdi"
-                     @@ HashMap.find var env.varoffset )
+                     @@ Hashmap.find var env.varoffset )
                    freevars ) ;
                appstr buf code ;
                appstr buf "pop rax" ;
@@ -2895,6 +2820,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     gen_c_func "aqaml_string_get" [CTyPtr; CTyInt] CTyInt ;
     gen_c_func "aqaml_string_set" [CTyPtr; CTyInt; CTyInt] CTyInt ;
     gen_c_func "aqaml_array_get" [CTyPtr; CTyInt] CTyPtr ;
+    gen_c_func "aqaml_array_length" [CTyPtr] CTyInt ;
     gen_c_func "aqaml_string_create" [CTyInt] CTyPtr ;
     gen_c_func "aqaml_string_blit"
       [CTyPtr; CTyInt; CTyPtr; CTyInt; CTyInt]
@@ -2951,6 +2877,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_char_code:" ;
+    appstr buf "aqaml_char_chr:" ;
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_exit:" ;
@@ -3081,8 +3008,49 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   in
   main_code ^ letfuncs_code ^ strings_code
 
+let input_lines inch =
+  let rec aux lines =
+    try
+      let line = input_line inch in
+      aux (line :: lines)
+    with End_of_file -> lines
+  in
+  String.concat "\n" (List.rev (aux []))
+
+let read_file path =
+  let inch = open_in path in
+  let str = input_lines inch in
+  close_in inch ; str
+
+let get_modulename_from_path path =
+  let rec aux i fi ti =
+    if i < 0 then
+      String.init
+        (ti - fi + 1)
+        (fun i ->
+          let idx = i + fi in
+          if i = 0 && path.[idx] >= 'a' then
+            Char.chr @@ (Char.code path.[idx] - 32)
+          else path.[idx] )
+    else
+      match path.[i] with
+      | '.' -> aux (i - 1) (i - 1) (i - 1)
+      | '/' -> aux (-1) fi ti
+      | _ -> aux (i - 1) i ti
+  in
+  let i = String.length path - 1 in
+  aux i i i
+
 ;;
 try
-  read_lines () |> tokenize |> parse |> analyze |> generate
+  let buf = Buffer.create 128 in
+  Array.iteri
+    (fun i path ->
+      if i >= 1 then
+        appfmt buf ";;module %s = struct %s end;;"
+          (get_modulename_from_path path)
+          (read_file path) )
+    Sys.argv ;
+  Buffer.contents buf |> tokenize |> parse |> analyze |> generate
   |> printf ".intel_syntax noprefix\n%s"
 with Failure str -> eprintf "[AQaml Error] %s\n" @@ str

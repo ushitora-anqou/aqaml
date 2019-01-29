@@ -550,3 +550,10 @@ uint64_t aqaml_array_get_detail(uint64_t ary_src, uint64_t idx)
     assert(idx < (ary.array->header >> 10));
     return ary.array->data[idx];
 }
+
+uint64_t aqaml_array_length_detail(uint64_t ary_src)
+{
+    AQamlValue ary = get_value(ary_src);
+    assert(ary.kind == AQAML_ARRAY);
+    return ary.array->header >> 10;
+}

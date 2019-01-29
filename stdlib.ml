@@ -32,7 +32,7 @@ external input_char : in_channel -> char = "aqaml_input_char"
 
 external open_in : string -> in_channel = "aqaml_open_in"
 
-external close_in : string -> in_channel = "aqaml_close_in"
+external close_in : in_channel -> unit = "aqaml_close_in"
 
 type 'a option = Some of 'a | None
 
@@ -44,6 +44,8 @@ let max a b = if a < b then b else a
 
 module Char = struct
   external code : char -> int = "aqaml_char_code"
+
+  external chr : int -> char = "aqaml_char_chr"
 end
 
 type bytes = string
@@ -69,9 +71,9 @@ module Bytes = struct
     string -> int -> bytes -> int -> int -> unit
     = "aqaml_string_blit"
 
-  let of_string str = str
+  let unsafe_of_string str = str
 
-  let to_string bytes = bytes
+  let unsafe_to_string bytes = bytes
 end
 
 module List = struct
@@ -146,6 +148,13 @@ module String = struct
     string -> int -> bytes -> int -> int -> unit
     = "aqaml_string_blit"
 
+  let init n f =
+    let buf = Bytes.create n in
+    for i = 0 to n - 1 do
+      Bytes.set buf i (f i)
+    done ;
+    Bytes.unsafe_to_string buf
+
   let concat sep = function
     | [] -> ""
     | lst ->
@@ -163,7 +172,7 @@ module String = struct
               Bytes.blit_string sep 0 buf (pos + hdlen) seplen ;
               aux (pos + hdlen + seplen) tl
         in
-        aux 0 lst ; Bytes.to_string buf
+        aux 0 lst ; Bytes.unsafe_to_string buf
 end
 
 module Buffer = struct
@@ -208,18 +217,27 @@ end
 
 module Array = struct
   external get : 'a array -> int -> 'a = "aqaml_array_get"
+
+  external length : 'a array -> int = "aqaml_array_length"
+
+  let iteri f ary =
+    for i = 0 to Array.length ary - 1 do
+      f i ary.(i)
+    done
 end
 
-let read_line () =
+let input_line inch =
   let buf = Buffer.create 65 in
   let rec aux () =
-    let ch = try Some (input_char stdin) with End_of_file -> None in
+    let ch = try Some (input_char inch) with End_of_file -> None in
     match ch with
     | Some '\n' -> ()
     | None -> if Buffer.length buf = 0 then raise End_of_file else ()
     | Some ch -> Buffer.add_char buf ch ; aux ()
   in
   aux () ; Buffer.contents buf
+
+let read_line () = input_line stdin
 
 let not x = if x then false else true
 
