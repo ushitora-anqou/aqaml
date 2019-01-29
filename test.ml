@@ -1644,3 +1644,7 @@ close_in ch
 let ary = [|1; 2; 3|] in
 test ary.(1) 2 ;
 test ((ary.(1) * 2) + 3) 7
+
+;;
+test Sys.argv.(1) "test_command_line_argument1" ;
+test Sys.argv.(2) "test_command_line_argument2"

@@ -222,3 +222,9 @@ let read_line () =
   aux () ; Buffer.contents buf
 
 let not x = if x then false else true
+
+module Sys = struct
+  external _aqaml_get_argv : unit -> string array = "aqaml_get_argv"
+
+  let argv = _aqaml_get_argv ()
+end

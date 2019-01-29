@@ -494,18 +494,25 @@ let tokenize program =
           | "done" -> aux (Done :: acc) i
           | _ when is_capital str.[0] ->
               let rec aux' i cap acc =
-                match maybe_next_char i with
-                | i, Some '.' ->
-                    let i, str = next_ident i in
-                    aux' i (is_capital str.[0]) (str :: acc)
-                | i, _ -> (
-                    let str = String.concat "." @@ List.rev acc in
-                    ( i - 1
-                    , match (cap, List.length acc > 1) with
-                      | false, false -> LowerIdent str
-                      | false, true -> LowerIdentWithModule str
-                      | true, false -> CapitalIdent str
-                      | true, true -> CapitalIdentWithModule str ) )
+                let is_dot_connected =
+                  match maybe_next_char i with
+                  | _, Some '.' -> (
+                    match maybe_next_char (i + 1) with
+                    | _, Some ('a' .. 'z' | 'A' .. 'Z' | '_') -> true
+                    | _ -> false )
+                  | _ -> false
+                in
+                if is_dot_connected then
+                  let i, str = next_ident (i + 1) in
+                  aux' i (is_capital str.[0]) (str :: acc)
+                else
+                  let str = String.concat "." @@ List.rev acc in
+                  ( i
+                  , match (cap, List.length acc > 1) with
+                    | false, false -> LowerIdent str
+                    | false, true -> LowerIdentWithModule str
+                    | true, false -> CapitalIdent str
+                    | true, true -> CapitalIdentWithModule str )
               in
               let i, tk = aux' i true [str] in
               aux (tk :: acc) i
@@ -3006,9 +3013,46 @@ let rec generate (letfuncs, strings, typedefs, exps) =
       appstr buf "jmp [r10]" ;
       appstr buf ""
     done ;
+    appstr buf "aqaml_get_argv:" ;
+    appstr buf "mov rax, [rip + aqaml_sys_argv]" ;
+    appstr buf "ret" ;
+    appstr buf "" ;
+    appstr buf ".global main" ;
     appstr buf "main:" ;
     appstr buf "push rbp" ;
     appstr buf "mov rbp, rsp" ;
+    (* handle command-line arguments *)
+    appstr buf "push rsi" ;
+    appstr buf "push rdi" ;
+    appstr buf "mov rsi, 0" ;
+    appstr buf "mov rdx, 1" ;
+    appstr buf "call aqaml_alloc_block@PLT" ;
+    appstr buf "pop rdi" ;
+    appstr buf "pop rsi" ;
+    let exit_label = make_label () in
+    let loop_label = make_label () in
+    appfmt buf "%s:" loop_label ;
+    appstr buf "cmp rdi, 0" ;
+    appfmt buf "je %s" exit_label ;
+    appstr buf "dec rdi" ;
+    appstr buf "mov rcx, [rsi + rdi * 8]" ;
+    appstr buf "push rax" ;
+    appstr buf "push rdi" ;
+    appstr buf "push rsi" ;
+    appstr buf "mov rdi, rcx" ;
+    appstr buf "call aqaml_create_string_from_cstr@PLT" ;
+    appstr buf "mov rcx, rax" ;
+    appstr buf "pop rsi" ;
+    appstr buf "pop rdi" ;
+    appstr buf "pop rax" ;
+    appstr buf "mov [rax + rdi * 8], rcx" ;
+    appfmt buf "jmp %s" loop_label ;
+    appfmt buf "%s:" exit_label ;
+    appstr buf ".data" ;
+    appstr buf "aqaml_sys_argv:" ;
+    appstr buf ".space 8" ;
+    appstr buf ".text" ;
+    appstr buf "mov [rip + aqaml_sys_argv], rax" ;
     (* default exception handler *)
     appstr buf "lea r13, [rip + aqaml_default_exception_handler]" ;
     appstr buf "push r13" ;
@@ -3033,5 +3077,5 @@ let rec generate (letfuncs, strings, typedefs, exps) =
 ;;
 try
   read_lines () |> tokenize |> parse |> analyze |> generate
-  |> printf ".intel_syntax noprefix\n.global main\n%s"
+  |> printf ".intel_syntax noprefix\n%s"
 with Failure str -> eprintf "[AQaml Error] %s\n" @@ str

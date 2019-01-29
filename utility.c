@@ -154,6 +154,15 @@ uint64_t aqaml_string_create_detail(uint64_t len)
     return ret_src;
 }
 
+uint64_t aqaml_create_string_from_cstr(const char *const cstr)
+{
+    uint64_t len = strlen(cstr);
+    uint64_t ret_src = aqaml_string_create_detail(len);
+    AQamlValue ret = get_value(ret_src);
+    for (uint64_t i = 0; i < len; i++) ret.string->str[i] = cstr[i];
+    return ret_src;
+}
+
 uint64_t aqaml_string_sub_detail(uint64_t str_src, uint64_t start, uint64_t len)
 {
     AQamlValue str = get_value(str_src);
@@ -538,5 +547,6 @@ uint64_t aqaml_array_get_detail(uint64_t ary_src, uint64_t idx)
 {
     AQamlValue ary = get_value(ary_src);
     assert(ary.kind == AQAML_ARRAY);
+    assert(idx < (ary.array->header >> 10));
     return ary.array->data[idx];
 }
