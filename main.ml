@@ -1399,14 +1399,6 @@ let analyze asts =
     ; modulename= ["Pervasives"]
     ; opened_modulename= ["Pervasives."] }
   in
-  let get_current_name_prefix () =
-    let buf = Buffer.create 128 in
-    List.iter (fun modname ->
-        Buffer.add_string buf modname ;
-        Buffer.add_char buf '.' )
-    @@ List.rev @@ toplevel.modulename ;
-    Buffer.contents buf
-  in
   let with_modulename name =
     String.concat "." @@ List.rev @@ (name :: toplevel.modulename)
   in
@@ -1415,28 +1407,38 @@ let analyze asts =
     | [expr] -> expr
     | exprs -> ExprSeq exprs
   in
-  let hashtbl_find_with_modulename hashtbl name =
-    try ("", Hashtbl.find hashtbl name) with Not_found -> (
+  let find_with_modulename find name =
+    try ("", find name) with Not_found -> (
       try
-        ( get_current_name_prefix ()
-        , Hashtbl.find hashtbl (with_modulename name) )
-      with Not_found ->
-        let modname =
-          List.find
-            (fun modname -> Hashtbl.mem hashtbl (modname ^ name))
-            toplevel.opened_modulename
+        let get_prefix modulename =
+          let buf = Buffer.create 128 in
+          List.iter (fun modname ->
+              Buffer.add_string buf modname ;
+              Buffer.add_char buf '.' )
+          @@ List.rev @@ modulename ;
+          Buffer.contents buf
         in
-        (modname, Hashtbl.find hashtbl (modname ^ name)) )
+        let rec aux modulename =
+          let prefix = get_prefix modulename in
+          try (prefix, find (prefix ^ name)) with Not_found -> (
+            match modulename with _ :: xs -> aux xs | [] -> raise Not_found )
+        in
+        aux toplevel.modulename
+      with Not_found ->
+        let rec aux = function
+          | prefix :: opened_modulename -> (
+            try (prefix, find @@ prefix ^ name) with Not_found ->
+              aux opened_modulename )
+          | [] -> raise Not_found
+        in
+        aux toplevel.opened_modulename )
+  in
+  let hashtbl_find_with_modulename hashtbl name =
+    find_with_modulename (fun x -> Hashtbl.find hashtbl x) name
   in
   let hashmap_find_with_modulename name hashmap =
-    try HashMap.find name hashmap with Not_found -> (
-      try HashMap.find (with_modulename name) hashmap with Not_found ->
-        let modname =
-          List.find
-            (fun modname -> HashMap.mem (modname ^ name) hashmap)
-            toplevel.opened_modulename
-        in
-        HashMap.find (modname ^ name) hashmap )
+    let _, res = find_with_modulename (fun x -> HashMap.find x hashmap) name in
+    res
   in
   let find_symbol env name =
     let rec aux depth env =
