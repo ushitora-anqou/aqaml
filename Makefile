@@ -1,4 +1,4 @@
-SRC=hashmap.ml hashtbl.ml main.ml
+SRC=hashmap.ml hashtbl.ml helper.ml lexer.ml main.ml
 
 aqaml: $(SRC)
 	ocamlopt $^ -o $@
