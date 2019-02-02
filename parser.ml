@@ -133,80 +133,84 @@ let parse tokens =
     | _ -> false
   in
   let is_if = function L.If :: _ -> true | _ -> false in
-  let rec parse_primary = function
-    | L.IntLiteral num :: tokens -> (tokens, IntValue num)
-    | L.CharLiteral ch :: tokens -> (tokens, CharValue ch)
-    | L.StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
-    | L.LRParen :: tokens -> (tokens, UnitValue)
-    | (L.LowerIdentWithModule varname | L.LowerIdent varname) :: tokens ->
-        (tokens, Var varname)
-    | (L.CapitalIdentWithModule ctorname | L.CapitalIdent ctorname) :: tokens
-      ->
-        (tokens, CtorApp (None, ctorname, None))
-    | L.LRBracket :: tokens -> (tokens, EmptyList)
-    | L.NarutoNaruto :: tokens -> parse_let tokens
-    | L.LParen :: tokens -> (
-        let tokens, ast = parse_expression tokens in
-        match tokens with
-        | L.RParen :: tokens -> (tokens, ast)
-        | x -> L.raise_unexpected_token x )
-    | L.LBracketBar :: tokens ->
-        let rec aux lst = function
-          | L.Semicolon :: tokens ->
-              let tokens, item = parse_let tokens in
-              aux (item :: lst) tokens
-          | L.BarRBracket :: tokens -> (tokens, ArrayValue (List.rev lst))
-          | x -> L.raise_unexpected_token x
-        in
-        let tokens, item = parse_let tokens in
-        aux [item] tokens
-    | L.LBracket :: tokens ->
-        let rec aux = function
-          | L.Semicolon :: tokens ->
-              let tokens, car = parse_let tokens in
-              let tokens, cdr = aux tokens in
-              (tokens, Cons (car, cdr))
-          | L.RBracket :: tokens -> (tokens, EmptyList)
-          | x -> L.raise_unexpected_token x
-        in
-        let tokens, car = parse_let tokens in
-        let tokens, cdr = aux tokens in
-        (tokens, Cons (car, cdr))
-    | L.LBrace :: tokens -> (
-        let rec parse_record_fields first fields tokens =
-          let aux fieldname = function
-            | L.Equal :: tokens -> parse_let tokens
-            | (L.Semicolon | L.RBrace) :: _ as tokens -> (tokens, Var fieldname)
+  let rec parse_primary tokens =
+    if is_let tokens || is_if tokens then parse_let tokens
+    else
+      match tokens with
+      | L.IntLiteral num :: tokens -> (tokens, IntValue num)
+      | L.CharLiteral ch :: tokens -> (tokens, CharValue ch)
+      | L.StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
+      | L.LRParen :: tokens -> (tokens, UnitValue)
+      | (L.LowerIdentWithModule varname | L.LowerIdent varname) :: tokens ->
+          (tokens, Var varname)
+      | (L.CapitalIdentWithModule ctorname | L.CapitalIdent ctorname) :: tokens
+        ->
+          (tokens, CtorApp (None, ctorname, None))
+      | L.LRBracket :: tokens -> (tokens, EmptyList)
+      | L.NarutoNaruto :: tokens -> parse_let tokens
+      | L.LParen :: tokens -> (
+          let tokens, ast = parse_expression tokens in
+          match tokens with
+          | L.RParen :: tokens -> (tokens, ast)
+          | x -> L.raise_unexpected_token x )
+      | L.LBracketBar :: tokens ->
+          let rec aux lst = function
+            | L.Semicolon :: tokens ->
+                let tokens, item = parse_let tokens in
+                aux (item :: lst) tokens
+            | L.BarRBracket :: tokens -> (tokens, ArrayValue (List.rev lst))
+            | x -> L.raise_unexpected_token x
+          in
+          let tokens, item = parse_let tokens in
+          aux [item] tokens
+      | L.LBracket :: tokens ->
+          let rec aux = function
+            | L.Semicolon :: tokens ->
+                let tokens, car = parse_let tokens in
+                let tokens, cdr = aux tokens in
+                (tokens, Cons (car, cdr))
+            | L.RBracket :: tokens -> (tokens, EmptyList)
+            | x -> L.raise_unexpected_token x
+          in
+          let tokens, car = parse_let tokens in
+          let tokens, cdr = aux tokens in
+          (tokens, Cons (car, cdr))
+      | L.LBrace :: tokens -> (
+          let rec parse_record_fields first fields tokens =
+            let aux fieldname = function
+              | L.Equal :: tokens -> parse_let tokens
+              | (L.Semicolon | L.RBrace) :: _ as tokens ->
+                  (tokens, Var fieldname)
+              | x -> L.raise_unexpected_token x
+            in
+            match tokens with
+            | (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
+              :: tokens
+              when first ->
+                let tokens, ast = aux fieldname tokens in
+                parse_record_fields false ((fieldname, ast) :: fields) tokens
+            | L.Semicolon
+              :: (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
+                 :: tokens
+              when not first ->
+                let tokens, ast = aux fieldname tokens in
+                parse_record_fields false ((fieldname, ast) :: fields) tokens
+            | L.RBrace :: tokens -> (tokens, fields)
             | x -> L.raise_unexpected_token x
           in
           match tokens with
-          | (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
-            :: tokens
-            when first ->
-              let tokens, ast = aux fieldname tokens in
-              parse_record_fields false ((fieldname, ast) :: fields) tokens
-          | L.Semicolon
-            :: (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
-               :: tokens
-            when not first ->
-              let tokens, ast = aux fieldname tokens in
-              parse_record_fields false ((fieldname, ast) :: fields) tokens
-          | L.RBrace :: tokens -> (tokens, fields)
-          | x -> L.raise_unexpected_token x
-        in
-        match tokens with
-        | (L.LowerIdent _ | L.LowerIdentWithModule _)
-          :: (L.Equal | L.Semicolon) :: _ ->
-            let tokens, fields = parse_record_fields true [] tokens in
-            (tokens, RecordValue (None, fields))
-        | _ -> (
-            let tokens, base = parse_prefix tokens in
-            match tokens with
-            | L.With :: tokens ->
-                let tokens, fields = parse_record_fields true [] tokens in
-                (tokens, RecordValueWith (None, base, fields, None))
-            | x -> L.raise_unexpected_token x ) )
-    | x -> L.raise_unexpected_token x
+          | (L.LowerIdent _ | L.LowerIdentWithModule _)
+            :: (L.Equal | L.Semicolon) :: _ ->
+              let tokens, fields = parse_record_fields true [] tokens in
+              (tokens, RecordValue (None, fields))
+          | _ -> (
+              let tokens, base = parse_prefix tokens in
+              match tokens with
+              | L.With :: tokens ->
+                  let tokens, fields = parse_record_fields true [] tokens in
+                  (tokens, RecordValueWith (None, base, fields, None))
+              | x -> L.raise_unexpected_token x ) )
+      | x -> L.raise_unexpected_token x
   and parse_prefix = function
     | L.Exclam :: tokens ->
         let tokens, ast = parse_primary tokens in
@@ -372,10 +376,7 @@ let parse tokens =
     let rec aux lhs tokens =
       match tokens with
       | L.Comma :: tokens ->
-          let tokens, rhs =
-            if is_let tokens || is_if tokens then parse_let tokens
-            else parse_logical_or tokens
-          in
+          let tokens, rhs = parse_logical_or tokens in
           aux (rhs :: lhs) tokens
       | _ -> (tokens, lhs)
     in

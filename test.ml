@@ -1667,3 +1667,6 @@ module TM2 = TestModule2
 let a = match TM1.Katsuo with TM1.Katsuo -> 30 | _ -> 3 in
 let b = match TM2.Katsuo 30 with TM2.Katsuo n -> n in
 test (a * b) 900
+
+;;
+test ((match 13 with n -> n) * match 9 with n -> n) 117
