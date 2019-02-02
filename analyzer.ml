@@ -96,7 +96,9 @@ let analyze asts =
   let find_with_modulename find name =
     let analyze prefix components =
       let rec aux prefix = function
-        | [name] -> find @@ prefix ^ name
+        | [name] ->
+            let key = prefix ^ name in
+            (key, find key)
         | x :: xs -> aux (Hashtbl.find toplevel.modules @@ prefix ^ x ^ ".") xs
         | [] -> failwith "[FATAL]"
       in
@@ -105,18 +107,18 @@ let analyze asts =
     let components =
       if name.[0] = '.' then [name] else String.split_on_char '.' name
     in
-    try ("", analyze "" components) with Not_found -> (
+    try analyze "" components with Not_found -> (
       try
         let rec aux modulename =
           let prefix = get_modulename_prefix modulename in
-          try (prefix, analyze prefix components) with Not_found -> (
+          try analyze prefix components with Not_found -> (
             match modulename with _ :: xs -> aux xs | [] -> raise Not_found )
         in
         aux toplevel.modulename
       with Not_found ->
         let rec aux = function
           | prefix :: opened_modulename -> (
-            try (prefix, analyze prefix components) with Not_found ->
+            try analyze prefix components with Not_found ->
               aux opened_modulename )
           | [] -> raise Not_found
         in
@@ -171,11 +173,11 @@ let analyze asts =
         let arg =
           match arg with Some arg -> Some (aux_ptn env arg) | _ -> None
         in
-        let name_prefix, typename =
+        let ctorname_or_expname, typename =
           try hashtbl_find_with_modulename toplevel.ctors_type ctorname
           with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
         in
-        CtorApp (Some typename, name_prefix ^ ctorname, arg)
+        CtorApp (Some typename, ctorname_or_expname, arg)
     | _ -> failwith "unexpected pattern"
   in
   let rec analyze_pattern_match_cases env cases =
@@ -198,8 +200,13 @@ let analyze asts =
     | ArrayValue values -> ArrayValue (List.map (fun x -> aux env x) values)
     | RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
-        let name_prefix, typename =
+        let full_key_fieldname, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
+        in
+        let name_prefix =
+          ( String.sub full_key_fieldname 0
+          @@ String.rindex full_key_fieldname '.' )
+          ^ "."
         in
         RecordValue
           ( Some typename
@@ -208,8 +215,13 @@ let analyze asts =
               fields )
     | RecordValueWith (None, base, fields, None) ->
         let key_fieldname, _ = List.hd fields in
-        let name_prefix, typename =
+        let full_key_fieldname, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
+        in
+        let name_prefix =
+          ( String.sub full_key_fieldname 0
+          @@ String.rindex full_key_fieldname '.' )
+          ^ "."
         in
         let fields =
           hashmap_of_list
@@ -226,10 +238,10 @@ let analyze asts =
         RecordValueWith
           (Some typename, aux env base, fields, Some comp_fieldnames)
     | RecordDotAccess (None, ast, fieldname) ->
-        let name_prefix, typename =
+        let fieldname, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
-        RecordDotAccess (Some typename, aux env ast, name_prefix ^ fieldname)
+        RecordDotAccess (Some typename, aux env ast, fieldname)
     | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
     | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
     | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
@@ -247,11 +259,10 @@ let analyze asts =
     | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
     | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
     | RecordAssign (None, lhs, fieldname, rhs) ->
-        let name_prefix, typename =
+        let fieldname, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
-        RecordAssign
-          (Some typename, aux env lhs, name_prefix ^ fieldname, aux env rhs)
+        RecordAssign (Some typename, aux env lhs, fieldname, aux env rhs)
     | Deref ast -> Deref (aux env ast)
     | Negate ast -> Negate (aux env ast)
     | Positate ast -> Positate (aux env ast)
@@ -298,11 +309,11 @@ let analyze asts =
           sym
       | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
     | CtorApp (None, ctorname, None) ->
-        let name_prefix, typename =
+        let ctorname_or_expname, typename =
           try hashtbl_find_with_modulename toplevel.ctors_type ctorname
           with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
         in
-        CtorApp (Some typename, name_prefix ^ ctorname, None)
+        CtorApp (Some typename, ctorname_or_expname, None)
     | TypeAnd entries ->
         toplevel.typedefs
         <- List.rev_append toplevel.typedefs
