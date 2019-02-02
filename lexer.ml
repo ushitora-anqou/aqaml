@@ -58,11 +58,11 @@ type token =
   | Dot
   | DotDot
   | Of
-  | KwInt
-  | KwChar
-  | KwUnit
-  | KwBool
-  | KwString
+  | Int
+  | Char
+  | Unit
+  | Bool
+  | String
   | Apostrophe
   | And
   | Hat
@@ -147,11 +147,11 @@ let string_of_token = function
   | Dot -> "."
   | DotDot -> ".."
   | Of -> "of"
-  | KwInt -> "int"
-  | KwChar -> "char"
-  | KwUnit -> "unit"
-  | KwBool -> "bool"
-  | KwString -> "string"
+  | Int -> "int"
+  | Char -> "char"
+  | Unit -> "unit"
+  | Bool -> "bool"
+  | String -> "string"
   | Apostrophe -> "'"
   | And -> "and"
   | Hat -> "^"
@@ -337,11 +337,11 @@ let tokenize program =
           | "when" -> aux (When :: acc) i
           | "type" -> aux (Type :: acc) i
           | "of" -> aux (Of :: acc) i
-          | "int" -> aux (KwInt :: acc) i
-          | "char" -> aux (KwChar :: acc) i
-          | "unit" -> aux (KwUnit :: acc) i
-          | "bool" -> aux (KwBool :: acc) i
-          | "string" -> aux (KwString :: acc) i
+          | "int" -> aux (Int :: acc) i
+          | "char" -> aux (Char :: acc) i
+          | "unit" -> aux (Unit :: acc) i
+          | "bool" -> aux (Bool :: acc) i
+          | "string" -> aux (String :: acc) i
           | "and" -> aux (And :: acc) i
           | "try" -> aux (Try :: acc) i
           | "exception" -> aux (Exception :: acc) i

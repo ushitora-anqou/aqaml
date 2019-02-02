@@ -1,4 +1,4 @@
-open Lexer
+module L = Lexer
 
 type typ =
   | TyInt
@@ -115,115 +115,118 @@ let rec varnames_in_pattern = function
 
 let parse tokens =
   let is_primary = function
-    | ( IntLiteral _ | CharLiteral _ | StringLiteral _ | LowerIdent _
-      | LowerIdentWithModule _ | CapitalIdent _ | CapitalIdentWithModule _
-      | LRBracket | NarutoNaruto | LParen | LBracket | LRParen | LBrace )
+    | ( L.IntLiteral _ | L.CharLiteral _ | L.StringLiteral _ | L.LowerIdent _
+      | L.LowerIdentWithModule _ | L.CapitalIdent _
+      | L.CapitalIdentWithModule _ | L.LRBracket | L.NarutoNaruto | L.LParen
+      | L.LBracket | L.LRParen | L.LBrace )
       :: _ ->
         true
     | _ -> false
   in
   let is_dot = function
-    | (Dot | DotLBracket | DotLParen) :: _ -> true
+    | (L.Dot | L.DotLBracket | L.DotLParen) :: _ -> true
     | _ -> false
   in
-  let is_prefix = function Exclam :: _ -> true | _ -> false in
+  let is_prefix = function L.Exclam :: _ -> true | _ -> false in
   let is_let = function
-    | (Function | Fun | Match | Try | Let) :: _ -> true
+    | (L.Function | L.Fun | L.Match | L.Try | L.Let) :: _ -> true
     | _ -> false
   in
-  let is_if = function If :: _ -> true | _ -> false in
+  let is_if = function L.If :: _ -> true | _ -> false in
   let rec parse_primary = function
-    | IntLiteral num :: tokens -> (tokens, IntValue num)
-    | CharLiteral ch :: tokens -> (tokens, CharValue ch)
-    | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
-    | LRParen :: tokens -> (tokens, UnitValue)
-    | (LowerIdentWithModule varname | LowerIdent varname) :: tokens ->
+    | L.IntLiteral num :: tokens -> (tokens, IntValue num)
+    | L.CharLiteral ch :: tokens -> (tokens, CharValue ch)
+    | L.StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
+    | L.LRParen :: tokens -> (tokens, UnitValue)
+    | (L.LowerIdentWithModule varname | L.LowerIdent varname) :: tokens ->
         (tokens, Var varname)
-    | (CapitalIdentWithModule ctorname | CapitalIdent ctorname) :: tokens ->
+    | (L.CapitalIdentWithModule ctorname | L.CapitalIdent ctorname) :: tokens
+      ->
         (tokens, CtorApp (None, ctorname, None))
-    | LRBracket :: tokens -> (tokens, EmptyList)
-    | NarutoNaruto :: tokens -> parse_let tokens
-    | LParen :: tokens -> (
+    | L.LRBracket :: tokens -> (tokens, EmptyList)
+    | L.NarutoNaruto :: tokens -> parse_let tokens
+    | L.LParen :: tokens -> (
         let tokens, ast = parse_expression tokens in
         match tokens with
-        | RParen :: tokens -> (tokens, ast)
-        | x -> raise_unexpected_token x )
-    | LBracketBar :: tokens ->
+        | L.RParen :: tokens -> (tokens, ast)
+        | x -> L.raise_unexpected_token x )
+    | L.LBracketBar :: tokens ->
         let rec aux lst = function
-          | Semicolon :: tokens ->
+          | L.Semicolon :: tokens ->
               let tokens, item = parse_let tokens in
               aux (item :: lst) tokens
-          | BarRBracket :: tokens -> (tokens, ArrayValue (List.rev lst))
-          | x -> raise_unexpected_token x
+          | L.BarRBracket :: tokens -> (tokens, ArrayValue (List.rev lst))
+          | x -> L.raise_unexpected_token x
         in
         let tokens, item = parse_let tokens in
         aux [item] tokens
-    | LBracket :: tokens ->
+    | L.LBracket :: tokens ->
         let rec aux = function
-          | Semicolon :: tokens ->
+          | L.Semicolon :: tokens ->
               let tokens, car = parse_let tokens in
               let tokens, cdr = aux tokens in
               (tokens, Cons (car, cdr))
-          | RBracket :: tokens -> (tokens, EmptyList)
-          | x -> raise_unexpected_token x
+          | L.RBracket :: tokens -> (tokens, EmptyList)
+          | x -> L.raise_unexpected_token x
         in
         let tokens, car = parse_let tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
-    | LBrace :: tokens -> (
+    | L.LBrace :: tokens -> (
         let rec parse_record_fields first fields tokens =
           let aux fieldname = function
-            | Equal :: tokens -> parse_let tokens
-            | (Semicolon | RBrace) :: _ as tokens -> (tokens, Var fieldname)
-            | x -> raise_unexpected_token x
+            | L.Equal :: tokens -> parse_let tokens
+            | (L.Semicolon | L.RBrace) :: _ as tokens -> (tokens, Var fieldname)
+            | x -> L.raise_unexpected_token x
           in
           match tokens with
-          | (LowerIdent fieldname | LowerIdentWithModule fieldname) :: tokens
+          | (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
+            :: tokens
             when first ->
               let tokens, ast = aux fieldname tokens in
               parse_record_fields false ((fieldname, ast) :: fields) tokens
-          | Semicolon
-            :: (LowerIdent fieldname | LowerIdentWithModule fieldname)
+          | L.Semicolon
+            :: (L.LowerIdent fieldname | L.LowerIdentWithModule fieldname)
                :: tokens
             when not first ->
               let tokens, ast = aux fieldname tokens in
               parse_record_fields false ((fieldname, ast) :: fields) tokens
-          | RBrace :: tokens -> (tokens, fields)
-          | x -> raise_unexpected_token x
+          | L.RBrace :: tokens -> (tokens, fields)
+          | x -> L.raise_unexpected_token x
         in
         match tokens with
-        | (LowerIdent _ | LowerIdentWithModule _) :: (Equal | Semicolon) :: _
-          ->
+        | (L.LowerIdent _ | L.LowerIdentWithModule _)
+          :: (L.Equal | L.Semicolon) :: _ ->
             let tokens, fields = parse_record_fields true [] tokens in
             (tokens, RecordValue (None, fields))
         | _ -> (
             let tokens, base = parse_prefix tokens in
             match tokens with
-            | With :: tokens ->
+            | L.With :: tokens ->
                 let tokens, fields = parse_record_fields true [] tokens in
                 (tokens, RecordValueWith (None, base, fields, None))
-            | x -> raise_unexpected_token x ) )
-    | x -> raise_unexpected_token x
+            | x -> L.raise_unexpected_token x ) )
+    | x -> L.raise_unexpected_token x
   and parse_prefix = function
-    | Exclam :: tokens ->
+    | L.Exclam :: tokens ->
         let tokens, ast = parse_primary tokens in
         (tokens, Deref ast)
     | tokens -> parse_primary tokens
   and parse_dot tokens =
     let tokens, lhs = parse_prefix tokens in
     match tokens with
-    | Dot :: LowerIdent fieldname :: tokens ->
+    | L.Dot :: L.LowerIdent fieldname :: tokens ->
         (tokens, RecordDotAccess (None, lhs, fieldname))
-    | DotLBracket :: tokens -> (
+    | L.DotLBracket :: tokens -> (
         let tokens, rhs = parse_expression tokens in
         match tokens with
-        | RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
-        | x -> raise_unexpected_token x )
-    | DotLParen :: tokens -> (
+        | L.RBracket :: tokens -> (tokens, StringGet (lhs, rhs))
+        | x -> L.raise_unexpected_token x )
+    | L.DotLParen :: tokens -> (
         let tokens, rhs = parse_expression tokens in
         match tokens with
-        | RParen :: tokens -> (tokens, ArrayGet (lhs, rhs))
-        | x -> raise_unexpected_token x )
+        | L.RParen :: tokens -> (tokens, ArrayGet (lhs, rhs))
+        | x -> L.raise_unexpected_token x )
     | _ -> (tokens, lhs)
   and parse_funccall tokens =
     let rec aux tokens =
@@ -238,22 +241,22 @@ let parse tokens =
     if args = [] then (tokens, func) (* not function call *)
     else (tokens, AppCls (func, args))
   and parse_unary = function
-    | Minus :: tokens ->
+    | L.Minus :: tokens ->
         let tokens, ast = parse_unary tokens in
         (tokens, Negate ast)
-    | Plus :: tokens ->
+    | L.Plus :: tokens ->
         let tokens, ast = parse_unary tokens in
         (tokens, Positate ast)
     | tokens -> parse_funccall tokens
   and parse_shift tokens =
     let rec aux lhs = function
-      | Lsl :: tokens ->
+      | L.Lsl :: tokens ->
           let tokens, rhs = parse_unary tokens in
           aux (LogicalLeftShift (lhs, rhs)) tokens
-      | Lsr :: tokens ->
+      | L.Lsr :: tokens ->
           let tokens, rhs = parse_unary tokens in
           aux (LogicalRightShift (lhs, rhs)) tokens
-      | Asr :: tokens ->
+      | L.Asr :: tokens ->
           let tokens, rhs = parse_unary tokens in
           aux (ArithmeticRightShift (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -262,19 +265,19 @@ let parse tokens =
     aux lhs tokens
   and parse_multiplicative tokens =
     let rec aux lhs = function
-      | Star :: tokens ->
+      | L.Star :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (Mul (lhs, rhs)) tokens
-      | Slash :: tokens ->
+      | L.Slash :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (Div (lhs, rhs)) tokens
-      | Mod :: tokens ->
+      | L.Mod :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (Rem (lhs, rhs)) tokens
-      | Land :: tokens ->
+      | L.Land :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (BitwiseAnd (lhs, rhs)) tokens
-      | Lor :: tokens ->
+      | L.Lor :: tokens ->
           let tokens, rhs = parse_shift tokens in
           aux (BitwiseOr (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -284,10 +287,10 @@ let parse tokens =
   and parse_additive tokens =
     let rec aux lhs tokens =
       match tokens with
-      | Plus :: tokens ->
+      | L.Plus :: tokens ->
           let tokens, rhs = parse_multiplicative tokens in
           aux (Add (lhs, rhs)) tokens
-      | Minus :: tokens ->
+      | L.Minus :: tokens ->
           let tokens, rhs = parse_multiplicative tokens in
           aux (Sub (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
@@ -297,17 +300,17 @@ let parse tokens =
   and parse_cons tokens =
     let tokens, car = parse_additive tokens in
     match tokens with
-    | ColonColon :: tokens ->
+    | L.ColonColon :: tokens ->
         let tokens, cdr = parse_cons tokens in
         (tokens, Cons (car, cdr))
     | _ -> (tokens, car)
   and parse_string_concat tokens =
     let rec aux lhs tokens =
       match tokens with
-      | Hat :: tokens ->
+      | L.Hat :: tokens ->
           let tokens, rhs = parse_cons tokens in
           aux (StringConcat (lhs, rhs)) tokens
-      | Naruto :: tokens ->
+      | L.Naruto :: tokens ->
           let tokens, rhs = parse_cons tokens in
           aux (ListConcat (lhs, rhs)) tokens
       | _ -> (tokens, lhs)
@@ -317,25 +320,25 @@ let parse tokens =
   and parse_structural_equal tokens =
     let rec aux lhs tokens =
       match tokens with
-      | Equal :: tokens ->
+      | L.Equal :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (StructEqual (lhs, rhs)) tokens
-      | LTGT :: tokens ->
+      | L.LTGT :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (StructInequal (lhs, rhs)) tokens
-      | LT :: Equal :: tokens ->
+      | L.LT :: L.Equal :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (LessThanEqual (lhs, rhs)) tokens
-      | GT :: Equal :: tokens ->
+      | L.GT :: L.Equal :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (LessThanEqual (rhs, lhs)) tokens
-      | LT :: tokens ->
+      | L.LT :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (LessThan (lhs, rhs)) tokens
-      | GT :: tokens ->
+      | L.GT :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux (LessThan (rhs, lhs)) tokens
-      | PipeGT :: tokens ->
+      | L.PipeGT :: tokens ->
           let tokens, rhs = parse_string_concat tokens in
           aux
             ( match rhs with
@@ -349,7 +352,7 @@ let parse tokens =
     aux ast tokens
   and parse_logical_and tokens =
     let rec aux lhs = function
-      | AndAnd :: tokens ->
+      | L.AndAnd :: tokens ->
           let tokens, rhs = parse_structural_equal tokens in
           aux (LogicalAnd (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -358,7 +361,7 @@ let parse tokens =
     aux ast tokens
   and parse_logical_or tokens =
     let rec aux lhs = function
-      | PipePipe :: tokens ->
+      | L.PipePipe :: tokens ->
           let tokens, rhs = parse_logical_and tokens in
           aux (LogicalOr (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -368,7 +371,7 @@ let parse tokens =
   and parse_tuple tokens =
     let rec aux lhs tokens =
       match tokens with
-      | Comma :: tokens ->
+      | L.Comma :: tokens ->
           let tokens, rhs =
             if is_let tokens || is_if tokens then parse_let tokens
             else parse_logical_or tokens
@@ -379,35 +382,35 @@ let parse tokens =
     let tokens, ast = parse_logical_or tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
-    | [] -> raise_unexpected_token []
+    | [] -> L.raise_unexpected_token []
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_assignment tokens =
     let tokens, lhs = parse_tuple tokens in
     match tokens with
-    | ColonEqual :: tokens ->
+    | L.ColonEqual :: tokens ->
         let tokens, rhs = parse_let tokens in
         (tokens, RefAssign (lhs, rhs))
-    | LArrow :: tokens -> (
+    | L.LArrow :: tokens -> (
         let tokens, rhs = parse_let tokens in
         match lhs with
         | StringGet (str, idx) -> (tokens, StringSet (str, idx, rhs))
         | RecordDotAccess (None, lhs, fieldname) ->
             (tokens, RecordAssign (None, lhs, fieldname, rhs))
-        | _ -> raise_unexpected_token tokens )
+        | _ -> L.raise_unexpected_token tokens )
     | _ -> (tokens, lhs)
   and parse_if = function
-    | If :: tokens -> (
+    | L.If :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
-        | Then :: tokens -> (
+        | L.Then :: tokens -> (
             let tokens, then_body = parse_let tokens in
             match tokens with
-            | Else :: tokens ->
+            | L.Else :: tokens ->
                 let tokens, else_body = parse_let tokens in
                 (tokens, IfThenElse (cond, then_body, Some else_body))
             | _ -> (tokens, IfThenElse (cond, then_body, None)) )
-        | x -> raise_unexpected_token x )
+        | x -> L.raise_unexpected_token x )
     | tokens -> parse_assignment tokens
   and parse_pattern_match tokens =
     let rec aux first cases tokens =
@@ -415,31 +418,31 @@ let parse tokens =
         let tokens, ptn = parse_pattern tokens in
         let tokens, whn =
           match tokens with
-          | When :: tokens ->
+          | L.When :: tokens ->
               let tokens, expr = parse_expression tokens in
               (tokens, Some expr)
           | _ -> (tokens, None)
         in
         match tokens with
-        | Arrow :: tokens ->
+        | L.Arrow :: tokens ->
             let tokens, case = parse_expression tokens in
             let tokens, cases = aux false ((ptn, whn, case) :: cases) tokens in
             (tokens, cases)
-        | x -> raise_unexpected_token x
+        | x -> L.raise_unexpected_token x
       in
       match tokens with
-      | Pipe :: tokens -> aux' tokens
+      | L.Pipe :: tokens -> aux' tokens
       | _ -> if first then aux' tokens else (tokens, List.rev cases)
     in
     aux true [] tokens
   and parse_let = function
-    | Function :: tokens ->
+    | L.Function :: tokens ->
         let argname = ".arg" in
         let tokens, cases = parse_pattern_match tokens in
         (tokens, Lambda ([Var argname], MatchWith (Var argname, cases)))
-    | Fun :: tokens ->
+    | L.Fun :: tokens ->
         let rec aux = function
-          | Arrow :: tokens -> (tokens, [])
+          | L.Arrow :: tokens -> (tokens, [])
           | tokens ->
               let tokens, arg = parse_pattern tokens in
               let tokens, args = aux tokens in
@@ -448,52 +451,52 @@ let parse tokens =
         let tokens, args = aux tokens in
         let tokens, func = parse_expression tokens in
         (tokens, Lambda (args, func))
-    | Match :: tokens -> (
+    | L.Match :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
-        | With :: tokens ->
+        | L.With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, MatchWith (cond, cases))
-        | x -> raise_unexpected_token x )
-    | Try :: tokens -> (
+        | x -> L.raise_unexpected_token x )
+    | L.Try :: tokens -> (
         let tokens, cond = parse_expression tokens in
         match tokens with
-        | With :: tokens ->
+        | L.With :: tokens ->
             let tokens, cases = parse_pattern_match tokens in
             (tokens, TryWith (cond, cases))
-        | x -> raise_unexpected_token x )
-    | For :: LowerIdent indexname :: Equal :: tokens -> (
+        | x -> L.raise_unexpected_token x )
+    | L.For :: L.LowerIdent indexname :: L.Equal :: tokens -> (
         let tokens, expr1 = parse_expression tokens in
         match tokens with
-        | ((To | Downto) as dir) :: tokens -> (
+        | ((L.To | L.Downto) as dir) :: tokens -> (
             let tokens, expr2 = parse_expression tokens in
             match tokens with
-            | Do :: tokens -> (
+            | L.Do :: tokens -> (
                 let tokens, expr3 = parse_expression tokens in
                 match tokens with
-                | Done :: tokens ->
+                | L.Done :: tokens ->
                     ( tokens
                     , ForLoop
-                        ( (if dir = To then ForTo else ForDownto)
+                        ( (if dir = L.To then ForTo else ForDownto)
                         , indexname
                         , expr1
                         , expr2
                         , expr3 ) )
-                | x -> raise_unexpected_token x )
-            | x -> raise_unexpected_token x )
-        | x -> raise_unexpected_token x )
-    | Let :: tokens -> (
+                | x -> L.raise_unexpected_token x )
+            | x -> L.raise_unexpected_token x )
+        | x -> L.raise_unexpected_token x )
+    | L.Let :: tokens -> (
         let parse_let_binding tokens =
           let tokens, bind = parse_pattern tokens in
           match tokens with
-          | Equal :: tokens ->
+          | L.Equal :: tokens ->
               (* define constants *)
               let tokens, lhs = parse_expression tokens in
               (tokens, ([bind], lhs))
           | _ ->
               (* define function *)
               let rec aux = function
-                | Equal :: tokens -> (tokens, [])
+                | L.Equal :: tokens -> (tokens, [])
                 | tokens ->
                     let tokens, arg = parse_pattern tokens in
                     let tokens, args = aux tokens in
@@ -505,11 +508,11 @@ let parse tokens =
         in
         let tokens, recursive =
           match tokens with
-          | Rec :: tokens -> (tokens, true)
+          | L.Rec :: tokens -> (tokens, true)
           | _ -> (tokens, false)
         in
         let rec aux' lets = function
-          | And :: tokens ->
+          | L.And :: tokens ->
               let tokens, le = parse_let_binding tokens in
               aux' (le :: lets) tokens
           | tokens -> (tokens, lets)
@@ -517,14 +520,14 @@ let parse tokens =
         let tokens, le = parse_let_binding tokens in
         let tokens, lets = aux' [le] tokens in
         match tokens with
-        | In :: tokens ->
+        | L.In :: tokens ->
             let tokens, rhs_of_in = parse_expression tokens in
             (tokens, LetAnd (recursive, lets, Some rhs_of_in))
         | _ -> (tokens, LetAnd (recursive, lets, None)) )
     | tokens -> parse_if tokens
   and parse_expr_sequence tokens =
     let rec aux = function
-      | Semicolon :: tokens ->
+      | L.Semicolon :: tokens ->
           let tokens, expr = parse_let tokens in
           let tokens, exprs = aux tokens in
           (tokens, expr :: exprs)
@@ -536,34 +539,35 @@ let parse tokens =
     else (tokens, ExprSeq (expr :: exprs))
   and parse_expression tokens = parse_expr_sequence tokens
   and parse_pattern_primary = function
-    | IntLiteral num :: tokens -> (tokens, IntValue num)
-    | CharLiteral ch :: tokens -> (tokens, CharValue ch)
-    | StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
-    | LRParen :: tokens -> (tokens, UnitValue)
-    | (LowerIdent id | LowerIdentWithModule id) :: tokens -> (tokens, Var id)
-    | (CapitalIdent id | CapitalIdentWithModule id) :: tokens ->
+    | L.IntLiteral num :: tokens -> (tokens, IntValue num)
+    | L.CharLiteral ch :: tokens -> (tokens, CharValue ch)
+    | L.StringLiteral (id, str) :: tokens -> (tokens, StringValue (id, str))
+    | L.LRParen :: tokens -> (tokens, UnitValue)
+    | (L.LowerIdent id | L.LowerIdentWithModule id) :: tokens ->
+        (tokens, Var id)
+    | (L.CapitalIdent id | L.CapitalIdentWithModule id) :: tokens ->
         (tokens, CtorApp (None, id, None))
-    | LRBracket :: tokens -> (tokens, EmptyList)
-    | LParen :: tokens -> (
+    | L.LRBracket :: tokens -> (tokens, EmptyList)
+    | L.LParen :: tokens -> (
         let tokens, ast = parse_pattern tokens in
         match tokens with
-        | RParen :: tokens -> (tokens, ast)
-        | x -> raise_unexpected_token x )
-    | LBracket :: tokens ->
+        | L.RParen :: tokens -> (tokens, ast)
+        | x -> L.raise_unexpected_token x )
+    | L.LBracket :: tokens ->
         let rec aux = function
-          | Semicolon :: tokens ->
+          | L.Semicolon :: tokens ->
               let tokens, car = parse_pattern tokens in
               let tokens, cdr = aux tokens in
               (tokens, Cons (car, cdr))
-          | RBracket :: tokens -> (tokens, EmptyList)
-          | x -> raise_unexpected_token x
+          | L.RBracket :: tokens -> (tokens, EmptyList)
+          | x -> L.raise_unexpected_token x
         in
         let tokens, car = parse_pattern tokens in
         let tokens, cdr = aux tokens in
         (tokens, Cons (car, cdr))
-    | x -> raise_unexpected_token x
+    | x -> L.raise_unexpected_token x
   and parse_pattern_range = function
-    | CharLiteral st :: DotDot :: CharLiteral ed :: tokens ->
+    | L.CharLiteral st :: L.DotDot :: L.CharLiteral ed :: tokens ->
         (tokens, PtnRange (st, ed))
     | tokens -> parse_pattern_primary tokens
   and parse_pattern_ctor_app tokens =
@@ -576,14 +580,14 @@ let parse tokens =
   and parse_pattern_cons tokens =
     let tokens, car = parse_pattern_ctor_app tokens in
     match tokens with
-    | ColonColon :: tokens ->
+    | L.ColonColon :: tokens ->
         let tokens, cdr = parse_pattern_cons tokens in
         (tokens, Cons (car, cdr))
     | _ -> (tokens, car)
   and parse_pattern_tuple tokens =
     let rec aux lhs tokens =
       match tokens with
-      | Comma :: tokens ->
+      | L.Comma :: tokens ->
           let tokens, rhs = parse_pattern_cons tokens in
           aux (rhs :: lhs) tokens
       | _ -> (tokens, lhs)
@@ -591,12 +595,12 @@ let parse tokens =
     let tokens, ast = parse_pattern_cons tokens in
     let tokens, ast_list = aux [ast] tokens in
     match ast_list with
-    | [] -> raise_unexpected_token []
+    | [] -> L.raise_unexpected_token []
     | [ast] -> (tokens, ast)
     | asts -> (tokens, TupleValue (List.rev asts))
   and parse_pattern_or tokens =
     let rec aux lhs = function
-      | Pipe :: tokens ->
+      | L.Pipe :: tokens ->
           let tokens, rhs = parse_pattern_tuple tokens in
           aux (PtnOr (lhs, rhs)) tokens
       | tokens -> (tokens, lhs)
@@ -606,32 +610,33 @@ let parse tokens =
   and parse_pattern_as tokens =
     let tokens, ptn = parse_pattern_or tokens in
     match tokens with
-    | As :: LowerIdent name :: tokens -> (tokens, PtnAlias (ptn, Var name))
+    | L.As :: L.LowerIdent name :: tokens -> (tokens, PtnAlias (ptn, Var name))
     | _ -> (tokens, ptn)
   and parse_pattern tokens = parse_pattern_as tokens
   and parse_typexpr_primary = function
-    | KwInt :: tokens -> (tokens, TyInt)
-    | KwChar :: tokens -> (tokens, TyChar)
-    | KwUnit :: tokens -> (tokens, TyUnit)
-    | KwBool :: tokens -> (tokens, TyBool)
-    | KwString :: tokens -> (tokens, TyString)
-    | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
-    | (LowerIdent typename | LowerIdentWithModule typename) :: tokens ->
+    | L.Int :: tokens -> (tokens, TyInt)
+    | L.Char :: tokens -> (tokens, TyChar)
+    | L.Unit :: tokens -> (tokens, TyUnit)
+    | L.Bool :: tokens -> (tokens, TyBool)
+    | L.String :: tokens -> (tokens, TyString)
+    | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, TyVar id)
+    | (L.LowerIdent typename | L.LowerIdentWithModule typename) :: tokens ->
         (tokens, TyCustom typename)
-    | LParen :: _ ->
-        failwith "Any token LParen should be handled in parse_typexpr_ctor_app"
-    | x -> raise_unexpected_token x
+    | L.LParen :: _ ->
+        failwith
+          "Any token L.LParen should be handled in parse_typexpr_ctor_app"
+    | x -> L.raise_unexpected_token x
   and parse_typexpr_ctor_app tokens =
     let tokens, lhs =
       match tokens with
-      | LParen :: tokens ->
+      | L.LParen :: tokens ->
           let tokens, typexpr = parse_typexpr tokens in
           let rec aux types = function
-            | Comma :: tokens ->
+            | L.Comma :: tokens ->
                 let tokens, typexpr = parse_typexpr tokens in
                 aux (typexpr :: types) tokens
-            | RParen :: tokens -> (tokens, types)
-            | x -> raise_unexpected_token x
+            | L.RParen :: tokens -> (tokens, types)
+            | x -> L.raise_unexpected_token x
           in
           let tokens, types = aux [typexpr] tokens in
           let types = List.rev types in
@@ -640,15 +645,15 @@ let parse tokens =
       | _ -> parse_typexpr_primary tokens
     in
     let rec aux lhs = function
-      | (LowerIdent typectorname | LowerIdentWithModule typectorname) :: tokens
-        ->
+      | (L.LowerIdent typectorname | L.LowerIdentWithModule typectorname)
+        :: tokens ->
           aux (TyCtorApp (lhs, typectorname)) tokens
       | tokens -> (tokens, lhs)
     in
     aux lhs tokens
   and parse_typexpr_tuple tokens =
     let rec aux lhs = function
-      | Star :: tokens ->
+      | L.Star :: tokens ->
           let tokens, rhs = parse_typexpr_ctor_app tokens in
           aux (rhs :: lhs) tokens
       | tokens -> (tokens, lhs)
@@ -656,34 +661,34 @@ let parse tokens =
     let tokens, typexpr = parse_typexpr_ctor_app tokens in
     let tokens, typexprs = aux [typexpr] tokens in
     match typexprs with
-    | [] -> raise_unexpected_token []
+    | [] -> L.raise_unexpected_token []
     | [typexpr] -> (tokens, typexpr)
     | typexprs -> (tokens, TyTuple typexprs)
   and parse_typexpr_func tokens =
     let tokens, lhs = parse_typexpr_tuple tokens in
     match tokens with
-    | Arrow :: tokens ->
+    | L.Arrow :: tokens ->
         let tokens, rhs = parse_typexpr_func tokens in
         (tokens, TyFunc (lhs, rhs))
     | _ -> (tokens, lhs)
   and parse_typexpr tokens = parse_typexpr_func tokens
   and parse_type_def tokens =
     let parse_type_param = function
-      | Apostrophe :: LowerIdent id :: tokens -> (tokens, TyVar id)
-      | x -> raise_unexpected_token x
+      | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, TyVar id)
+      | x -> L.raise_unexpected_token x
     in
     let parse_type_params = function
-      | LParen :: tokens ->
+      | L.LParen :: tokens ->
           let rec aux type_params = function
-            | Comma :: tokens ->
+            | L.Comma :: tokens ->
                 let tokens, type_param = parse_type_param tokens in
                 aux (type_param :: type_params) tokens
-            | RParen :: tokens -> (tokens, TyTuple type_params)
-            | x -> raise_unexpected_token x
+            | L.RParen :: tokens -> (tokens, TyTuple type_params)
+            | x -> L.raise_unexpected_token x
           in
           let tokens, type_param = parse_type_param tokens in
           Some (aux [type_param] tokens)
-      | Apostrophe :: _ as tokens -> Some (parse_type_param tokens)
+      | L.Apostrophe :: _ as tokens -> Some (parse_type_param tokens)
       | _ -> None
     in
     let parse_type_def_entry tokens =
@@ -693,18 +698,18 @@ let parse tokens =
         | Some (tokens, type_params) -> (tokens, Some type_params)
       in
       match tokens with
-      | LowerIdent typename :: Equal :: tokens -> (
+      | L.LowerIdent typename :: L.Equal :: tokens -> (
           let parse_variant tokens =
             let rec aux first ctors = function
-              | Pipe :: CapitalIdent ctorname :: Of :: tokens ->
+              | L.Pipe :: L.CapitalIdent ctorname :: L.Of :: tokens ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
-              | CapitalIdent ctorname :: Of :: tokens when first ->
+              | L.CapitalIdent ctorname :: L.Of :: tokens when first ->
                   let tokens, typ = parse_typexpr tokens in
                   aux false ((ctorname, Some typ) :: ctors) tokens
-              | Pipe :: CapitalIdent ctorname :: tokens ->
+              | L.Pipe :: L.CapitalIdent ctorname :: tokens ->
                   aux false ((ctorname, None) :: ctors) tokens
-              | CapitalIdent ctorname :: tokens when first ->
+              | L.CapitalIdent ctorname :: tokens when first ->
                   aux false ((ctorname, None) :: ctors) tokens
               | tokens -> (tokens, ctors)
             in
@@ -712,19 +717,21 @@ let parse tokens =
             (tokens, DefVariant (type_param, typename, ctors))
           in
           match tokens with
-          | CapitalIdent str :: _ -> parse_variant tokens
-          | Pipe :: _ -> parse_variant tokens
+          | L.CapitalIdent str :: _ -> parse_variant tokens
+          | L.Pipe :: _ -> parse_variant tokens
           (* TODO: skip mutable *)
-          | LBrace :: LowerIdent fieldname :: Colon :: tokens
-           |LBrace :: Mutable :: LowerIdent fieldname :: Colon :: tokens ->
+          | L.LBrace :: L.LowerIdent fieldname :: L.Colon :: tokens
+           |L.LBrace
+            :: L.Mutable :: L.LowerIdent fieldname :: L.Colon :: tokens ->
               let rec aux fields = function
-                | Semicolon :: LowerIdent fieldname :: Colon :: tokens
-                 |Semicolon
-                  :: Mutable :: LowerIdent fieldname :: Colon :: tokens ->
+                | L.Semicolon :: L.LowerIdent fieldname :: L.Colon :: tokens
+                 |L.Semicolon
+                  :: L.Mutable :: L.LowerIdent fieldname :: L.Colon :: tokens
+                  ->
                     let tokens, typexpr = parse_typexpr tokens in
                     aux ((fieldname, typexpr) :: fields) tokens
-                | RBrace :: tokens -> (tokens, fields)
-                | x -> raise_unexpected_token x
+                | L.RBrace :: tokens -> (tokens, fields)
+                | x -> L.raise_unexpected_token x
               in
               let tokens, typexpr = parse_typexpr tokens in
               let tokens, fields = aux [(fieldname, typexpr)] tokens in
@@ -732,24 +739,24 @@ let parse tokens =
           | tokens ->
               let tokens, typ = parse_typexpr tokens in
               (tokens, DefTypeAlias (type_param, typename, typ)) )
-      | x -> raise_unexpected_token x
+      | x -> L.raise_unexpected_token x
     in
     let rec aux entries = function
-      | And :: tokens ->
+      | L.And :: tokens ->
           let tokens, entry = parse_type_def_entry tokens in
           aux (entry :: entries) tokens
       | tokens -> (tokens, TypeAnd entries)
     in
-    (* token Type is already fetched *)
+    (* token L.Type is already fetched *)
     let tokens, entry = parse_type_def_entry tokens in
     aux [entry] tokens
   and parse_exp_def = function
-    (* token Exception is already fetched *)
-    | CapitalIdent expname :: Of :: tokens ->
+    (* token L.Exception is already fetched *)
+    | L.CapitalIdent expname :: L.Of :: tokens ->
         let tokens, typ = parse_typexpr tokens in
         (tokens, ExpDef (expname, Some typ))
-    | CapitalIdent expname :: tokens -> (tokens, ExpDef (expname, None))
-    | x -> raise_unexpected_token x
+    | L.CapitalIdent expname :: tokens -> (tokens, ExpDef (expname, None))
+    | x -> L.raise_unexpected_token x
   in
   let parse_expressions_and_definitions tokens =
     (* Here are some tricks. All expressions split by double semicolons (;;)
@@ -759,34 +766,35 @@ let parse tokens =
     (* TODO: correct? *)
     (* TODO: not correct. definitions and expressions should be completely separated. *)
     let rec aux exprs = function
-      | SemicolonSemicolon :: tokens -> aux exprs tokens
+      | L.SemicolonSemicolon :: tokens -> aux exprs tokens
       | [] -> ([], List.rev exprs)
-      | Type :: tokens ->
+      | L.Type :: tokens ->
           let tokens, expr = parse_type_def tokens in
           aux (expr :: exprs) tokens
-      | Exception :: tokens ->
+      | L.Exception :: tokens ->
           let tokens, expr = parse_exp_def tokens in
           aux (expr :: exprs) tokens
-      | External :: LowerIdent id :: Colon :: tokens -> (
+      | L.External :: L.LowerIdent id :: L.Colon :: tokens -> (
           let tokens, typexpr = parse_typexpr tokens in
           match tokens with
-          | Equal :: StringLiteral (_, str) :: tokens ->
+          | L.Equal :: L.StringLiteral (_, str) :: tokens ->
               let ast = ExternalDecl (id, typexpr, str) in
               aux (ast :: exprs) tokens
-          | x -> raise_unexpected_token x )
-      | Open :: CapitalIdent modname :: tokens
-       |Open :: CapitalIdentWithModule modname :: tokens ->
+          | x -> L.raise_unexpected_token x )
+      | L.Open :: L.CapitalIdent modname :: tokens
+       |L.Open :: L.CapitalIdentWithModule modname :: tokens ->
           aux (OpenModuleDef modname :: exprs) tokens
-      | Module
-        :: CapitalIdent modulename
-           :: Equal :: CapitalIdent src_modulename :: tokens ->
+      | L.Module
+        :: L.CapitalIdent modulename
+           :: L.Equal :: L.CapitalIdent src_modulename :: tokens ->
           aux (ModuleAlias (modulename, src_modulename) :: exprs) tokens
-      | Module :: CapitalIdent modulename :: Equal :: Struct :: tokens ->
+      | L.Module :: L.CapitalIdent modulename :: L.Equal :: L.Struct :: tokens
+        ->
           let tokens, asts = aux [] tokens in
           let ast = ModuleDef (modulename, asts) in
           aux (ast :: exprs) tokens
-      | End :: tokens -> (* module end *)
-                         (tokens, List.rev exprs)
+      | L.End :: tokens -> (* module end *)
+                           (tokens, List.rev exprs)
       | tokens ->
           let tokens, expr = parse_expression tokens in
           aux (expr :: exprs) tokens

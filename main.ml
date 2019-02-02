@@ -1,6 +1,5 @@
 open Printf
 open Helper
-open Lexer
 open Parser
 open Analyzer
 open Generator
@@ -48,6 +47,6 @@ try
           (get_modulename_from_path path)
           (read_file path) )
     Sys.argv ;
-  Buffer.contents buf |> tokenize |> parse |> analyze |> generate
+  Buffer.contents buf |> Lexer.tokenize |> parse |> analyze |> generate
   |> printf ".intel_syntax noprefix\n%s"
 with Failure str -> eprintf "[AQaml Error] %s\n" @@ str
