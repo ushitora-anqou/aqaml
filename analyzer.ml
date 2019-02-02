@@ -102,20 +102,22 @@ let analyze asts =
       in
       aux prefix components
     in
-    try ("", find name) with Not_found -> (
+    let components =
+      if name.[0] = '.' then [name] else String.split_on_char '.' name
+    in
+    try ("", analyze "" components) with Not_found -> (
       try
         let rec aux modulename =
           let prefix = get_modulename_prefix modulename in
-          try (prefix, analyze prefix @@ String.split_on_char '.' name)
-          with Not_found -> (
+          try (prefix, analyze prefix components) with Not_found -> (
             match modulename with _ :: xs -> aux xs | [] -> raise Not_found )
         in
         aux toplevel.modulename
       with Not_found ->
         let rec aux = function
           | prefix :: opened_modulename -> (
-            try (prefix, analyze prefix @@ String.split_on_char '.' name)
-            with Not_found -> aux opened_modulename )
+            try (prefix, analyze prefix components) with Not_found ->
+              aux opened_modulename )
           | [] -> raise Not_found
         in
         aux toplevel.opened_modulename )
@@ -148,9 +150,20 @@ let analyze asts =
         TupleValue (List.map (fun x -> aux_ptn env x) values)
     | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
     | Var name -> (
-      match find_symbol env name with
-      | 0, sym -> sym
-      | _ -> failwith "[FATAL] variable not found in pattern analysis" )
+        let find_symbol env name =
+          let rec aux depth env =
+            try (depth, Hashmap.find name env.symbols) with Not_found -> (
+              match env.parent with
+              | Some parent -> aux (depth + 1) parent
+              | None ->
+                  failwith
+                    (sprintf "not found in analysis (find_symbol): %s" name) )
+          in
+          aux 0 env
+        in
+        match find_symbol env name with
+        | 0, sym -> sym
+        | _ -> failwith "[FATAL] variable not found in pattern analysis" )
     | PtnAlias (ptn, (Var _ as var)) ->
         PtnAlias (aux_ptn env ptn, aux_ptn env var)
     | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
@@ -626,6 +639,14 @@ let analyze asts =
   and analyze_module env exprs =
     let toplevel_env = ref env in
     let rec aux' exprs = function
+      | ModuleAlias (modname, src_modname) :: asts ->
+          let _, src_modname =
+            hashtbl_find_with_modulename toplevel.modules @@ src_modname ^ "."
+          in
+          Hashtbl.add toplevel.modules
+            (get_modulename_prefix (modname :: toplevel.modulename))
+            src_modname ;
+          aux' exprs asts
       | ModuleDef (this_modulename, body) :: asts ->
           toplevel.modulename <- this_modulename :: toplevel.modulename ;
           (* TODO: is there any better way? *)

@@ -72,6 +72,7 @@ type ast =
   | ArrayGet of ast * ast
   | ForLoop of for_loop_dir * string * ast * ast * ast
   | Nope
+  | ModuleAlias of string * string
   | ModuleDef of string * ast list
   (* for analysis *)
   | ModuleDefEnd
@@ -776,6 +777,10 @@ let parse tokens =
       | Open :: CapitalIdent modname :: tokens
        |Open :: CapitalIdentWithModule modname :: tokens ->
           aux (OpenModuleDef modname :: exprs) tokens
+      | Module
+        :: CapitalIdent modulename
+           :: Equal :: CapitalIdent src_modulename :: tokens ->
+          aux (ModuleAlias (modulename, src_modulename) :: exprs) tokens
       | Module :: CapitalIdent modulename :: Equal :: Struct :: tokens ->
           let tokens, asts = aux [] tokens in
           let ast = ModuleDef (modulename, asts) in
