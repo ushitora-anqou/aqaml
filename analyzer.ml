@@ -94,19 +94,28 @@ let analyze asts =
     Buffer.contents buf
   in
   let find_with_modulename find name =
+    let analyze prefix components =
+      let rec aux prefix = function
+        | [name] -> find @@ prefix ^ name
+        | x :: xs -> aux (Hashtbl.find toplevel.modules @@ prefix ^ x ^ ".") xs
+        | [] -> failwith "[FATAL]"
+      in
+      aux prefix components
+    in
     try ("", find name) with Not_found -> (
       try
         let rec aux modulename =
           let prefix = get_modulename_prefix modulename in
-          try (prefix, find (prefix ^ name)) with Not_found -> (
+          try (prefix, analyze prefix @@ String.split_on_char '.' name)
+          with Not_found -> (
             match modulename with _ :: xs -> aux xs | [] -> raise Not_found )
         in
         aux toplevel.modulename
       with Not_found ->
         let rec aux = function
           | prefix :: opened_modulename -> (
-            try (prefix, find @@ prefix ^ name) with Not_found ->
-              aux opened_modulename )
+            try (prefix, analyze prefix @@ String.split_on_char '.' name)
+            with Not_found -> aux opened_modulename )
           | [] -> raise Not_found
         in
         aux toplevel.opened_modulename )

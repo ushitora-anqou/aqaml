@@ -99,14 +99,14 @@ module List = struct
 
   let map f lst =
     let rec aux acc = function x :: xs -> aux (f x :: acc) xs | [] -> acc in
-    List.rev (aux [] lst)
+    rev (aux [] lst)
 
   let mapi f lst =
     let rec aux i acc = function
       | x :: xs -> aux (i + 1) (f i x :: acc) xs
       | [] -> acc
     in
-    List.rev (aux 0 [] lst)
+    rev (aux 0 [] lst)
 
   let rec rev_append l1 l2 =
     match l1 with x :: xs -> rev_append xs (x :: l2) | [] -> l2
@@ -124,7 +124,7 @@ module List = struct
       | x :: xs -> aux (if f x then x :: acc else acc) xs
       | [] -> acc
     in
-    List.rev (aux [] lst)
+    rev (aux [] lst)
 
   let rec find p = function
     | x :: xs -> if p x then x else find p xs
@@ -173,6 +173,22 @@ module String = struct
               aux (pos + hdlen + seplen) tl
         in
         aux 0 lst ; Bytes.unsafe_to_string buf
+
+  let rindex src ch =
+    let rec aux i =
+      if i = -1 then raise Not_found
+      else if get src i = ch then i
+      else aux (i - 1)
+    in
+    aux @@ (length src - 1)
+
+  let split_on_char ch src =
+    let rec aux acc f i =
+      if i = length src then List.rev @@ (sub src f (i - f) :: acc)
+      else if get src i = ch then aux (sub src f (i - f) :: acc) (i + 1) (i + 1)
+      else aux acc f (i + 1)
+    in
+    aux [] 0 0
 end
 
 module Buffer = struct
@@ -221,8 +237,8 @@ module Array = struct
   external length : 'a array -> int = "aqaml_array_length"
 
   let iteri f ary =
-    for i = 0 to Array.length ary - 1 do
-      f i ary.(i)
+    for i = 0 to length ary - 1 do
+      f i @@ get ary i
     done
 end
 
