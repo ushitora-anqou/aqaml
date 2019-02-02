@@ -21,7 +21,8 @@ type ast =
   | TupleValue of ast list
   | ArrayValue of ast list
   | RecordValue of string option * (string * ast) list
-  | RecordValueWith of ast * (string * ast) list
+  | RecordValueWith of
+      string option * ast * (string * ast) list * string list option
   | RecordDotAccess of string option * ast * string
   | Add of ast * ast
   | Sub of ast * ast
@@ -199,7 +200,7 @@ let parse tokens =
             match tokens with
             | With :: tokens ->
                 let tokens, fields = parse_record_fields true [] tokens in
-                (tokens, RecordValueWith (base, fields))
+                (tokens, RecordValueWith (None, base, fields, None))
             | x -> raise_unexpected_token x ) )
     | x -> raise_unexpected_token x
   and parse_prefix = function

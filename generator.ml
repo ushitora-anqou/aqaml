@@ -315,6 +315,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         Buffer.contents buf
     | _, RecordValue (Some typename, fields) ->
         let offset = new_offset env 1 in
+        let env = {env with offset} in
         let buf = Buffer.create 128 in
         appfmt buf "/* RecordValue %s BEGIN */" typename ;
         appstr buf @@ gen_alloc_block (List.length fields) 0 1 ;
@@ -329,6 +330,36 @@ let rec generate (letfuncs, strings, typedefs, exps) =
           fields ;
         appfmt buf "push [rbp + %d]" offset ;
         appfmt buf "/* RecordValue %s END */" typename ;
+        Buffer.contents buf
+    | _, RecordValueWith (Some typename, base, fields, Some comp_fieldnames) ->
+        let offset = new_offset env 1 in
+        let env = {env with offset} in
+        let buf = Buffer.create 128 in
+        appfmt buf "/* RecordValueWith %s BEGIN */" typename ;
+        appstr buf
+        @@ gen_alloc_block
+             (List.length fields + List.length comp_fieldnames)
+             0 1 ;
+        appfmt buf "mov [rbp + %d], rax" offset ;
+        List.iter
+          (fun (fieldname, ast) ->
+            appstr buf @@ aux env (NonTail, ast) ;
+            appstr buf "pop rax" ;
+            appfmt buf "mov rdi, [rbp + %d]" offset ;
+            let idx = Hashtbl.find records_idx (typename, fieldname) in
+            appfmt buf "mov [rdi + %d], rax" (idx * 8) )
+          fields ;
+        appstr buf @@ aux env (NonTail, base) ;
+        appstr buf "pop rax" ;
+        appfmt buf "mov rdi, [rbp + %d]" offset ;
+        List.iter
+          (fun fieldname ->
+            let idx = Hashtbl.find records_idx (typename, fieldname) in
+            appfmt buf "mov rsi, [rax + %d]" (idx * 8) ;
+            appfmt buf "mov [rdi + %d], rsi" (idx * 8) )
+          comp_fieldnames ;
+        appstr buf "push rdi" ;
+        appfmt buf "/* RecordValueWith %s END */" typename ;
         Buffer.contents buf
     | _, RecordDotAccess (Some typename, ast, fieldname) ->
         let idx = Hashtbl.find records_idx (typename, fieldname) in

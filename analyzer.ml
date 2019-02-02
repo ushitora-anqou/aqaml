@@ -193,33 +193,25 @@ let analyze asts =
           , List.map
               (fun (name, ast) -> (name_prefix ^ name, aux env ast))
               fields )
-    | RecordValueWith (base, fields) ->
+    | RecordValueWith (None, base, fields, None) ->
         let key_fieldname, _ = List.hd fields in
         let name_prefix, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
         in
-        let fieldnames = Hashtbl.find toplevel.records_fields typename in
         let fields =
           hashmap_of_list
           @@ List.map
-               (fun (fieldname, v) -> (name_prefix ^ fieldname, v))
+               (fun (fieldname, v) -> (name_prefix ^ fieldname, aux env v))
                fields
         in
-        let new_base = Var (make_id "var") in
-        aux env
-        @@ LetAnd
-             ( false
-             , [([new_base], base)]
-             , Some
-                 (RecordValue
-                    ( None
-                    , List.map
-                        (fun fieldname ->
-                          try (fieldname, Hashmap.find fieldname fields)
-                          with Not_found ->
-                            ( fieldname
-                            , RecordDotAccess (None, new_base, fieldname) ) )
-                        fieldnames )) )
+        let fieldnames = Hashtbl.find toplevel.records_fields typename in
+        let comp_fieldnames =
+          List.filter
+            (fun fieldname -> not @@ Hashmap.mem fieldname fields)
+            fieldnames
+        in
+        RecordValueWith
+          (Some typename, aux env base, fields, Some comp_fieldnames)
     | RecordDotAccess (None, ast, fieldname) ->
         let name_prefix, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
