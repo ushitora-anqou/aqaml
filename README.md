@@ -71,3 +71,7 @@ It's a nerimono.
 
 It's a nerimononerimono.
 
+## Note
+
+- Introduction to AQaml (in Japanese)
+    - [『はりぼて自作OCamlコンパイラAQamlでセルフホストしてみた』](https://anqou.net/poc/2019/01/27/post-2700/)
