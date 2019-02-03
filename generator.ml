@@ -194,7 +194,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appfmt buf "%s:" exp_label ;
     (* TODO: arguments of Match_failure *)
     appstr buf "mov rax, 1" ;
-    appstr buf @@ gen_raise_exp_of "Match_failure" true ;
+    appstr buf @@ gen_raise_exp_of "Stdlib.Match_failure" true ;
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   and gen_raise () =
@@ -802,7 +802,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
              (let buf = Buffer.create 128 in
               appstr buf "mov rax, 1" ;
               (* TODO: arguments for Match_failure *)
-              appstr buf @@ gen_raise_exp_of "Match_failure" true ;
+              appstr buf @@ gen_raise_exp_of "Stdlib.Match_failure" true ;
               Buffer.contents buf) ;
         appstr buf "/* MatchWith END */" ;
         Buffer.contents buf
@@ -993,7 +993,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "call aqaml_input_char_detail@PLT" ;
     appstr buf "cmp rax, -1" ;
     appfmt buf "jne %s" exit_label ;
-    appstr buf @@ gen_raise_exp_of "End_of_file" false ;
+    appstr buf @@ gen_raise_exp_of "Stdlib.End_of_file" false ;
     appfmt buf "%s:" exit_label ;
     appstr buf "ret" ;
     appstr buf "" ;
@@ -1005,7 +1005,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appfmt buf "jne %s" exit_label ;
     (* TODO: raise 'No such file or directory *)
     appstr buf "mov rax, 0" ;
-    appstr buf @@ gen_raise_exp_of "Sys_error" true ;
+    appstr buf @@ gen_raise_exp_of "Stdlib.Sys_error" true ;
     appfmt buf "%s:" exit_label ;
     appstr buf "ret" ;
     appstr buf "" ;

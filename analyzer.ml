@@ -353,6 +353,7 @@ let analyze asts =
                 entries ;
         Nope
     | ExpDef (expname, components) ->
+        let expname = with_modulename expname in
         Hashtbl.add toplevel.exps expname expname ;
         toplevel.exps_list <- expname :: toplevel.exps_list ;
         Nope
