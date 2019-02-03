@@ -1,9 +1,9 @@
-open Parser
+module P = Parser
 open Helper
 open Printf
 
 type environment =
-  { symbols: (string, ast) Hashmap.t
+  { symbols: (string, P.ast) Hashmap.t
   ; parent: environment option
   ; freevars: (string * string) list ref }
 
@@ -26,19 +26,19 @@ let rec list_unique lst =
 
 let add_symbols_in_pattern symbols ptn =
   integrate symbols @@ hashmap_of_list
-  @@ List.map (fun n -> (n, Var (make_id n)))
-  @@ varnames_in_pattern ptn
+  @@ List.map (fun n -> (n, P.Var (make_id n)))
+  @@ P.varnames_in_pattern ptn
 
 let add_symbols_in_patterns symbols ptns =
   integrate symbols @@ hashmap_of_list
-  @@ List.map (fun n -> (n, Var (make_id n)))
+  @@ List.map (fun n -> (n, P.Var (make_id n)))
   @@ List.flatten
-  @@ List.map varnames_in_pattern ptns
+  @@ List.map P.varnames_in_pattern ptns
 
 type type_toplevel =
-  { mutable letfuncs: ast list
-  ; mutable strings: ast list
-  ; mutable typedefs: typedef list
+  { mutable letfuncs: P.ast list
+  ; mutable strings: P.ast list
+  ; mutable typedefs: P.typedef list
   ; mutable exps_list: string list
   ; ctors_type: (string, string) Hashtbl.t
   ; exps: (string, string) Hashtbl.t
@@ -58,10 +58,10 @@ type type_toplevel =
     mutable opened_modulename: string list
   ; mutable modules: (string, string) Hashtbl.t }
 
-(* Used in analysis of LetAnd *)
+(* Used in analysis of P.LetAnd *)
 exception Should_be_closure
 
-exception LetDef of ast list * environment
+exception LetDef of P.ast list * environment
 
 let analyze asts =
   let toplevel =
@@ -81,9 +81,9 @@ let analyze asts =
     String.concat "." @@ List.rev @@ (name :: toplevel.modulename)
   in
   let exprs2expr = function
-    | [] -> Nope
+    | [] -> P.Nope
     | [expr] -> expr
-    | exprs -> ExprSeq exprs
+    | exprs -> P.ExprSeq exprs
   in
   let get_modulename_prefix modulename =
     let buf = Buffer.create 128 in
@@ -144,14 +144,16 @@ let analyze asts =
   in
   let rec aux_ptn env ptn =
     match ptn with
-    | IntValue _ | CharValue _ | UnitValue | EmptyList | PtnRange _ -> ptn
-    | StringValue _ ->
+    | P.IntValue _ | P.CharValue _ | P.UnitValue | P.EmptyList | P.PtnRange _
+      ->
+        ptn
+    | P.StringValue _ ->
         toplevel.strings <- ptn :: toplevel.strings ;
         ptn
-    | TupleValue values ->
-        TupleValue (List.map (fun x -> aux_ptn env x) values)
-    | Cons (car, cdr) -> Cons (aux_ptn env car, aux_ptn env cdr)
-    | Var name -> (
+    | P.TupleValue values ->
+        P.TupleValue (List.map (fun x -> aux_ptn env x) values)
+    | P.Cons (car, cdr) -> P.Cons (aux_ptn env car, aux_ptn env cdr)
+    | P.Var name -> (
         let find_symbol env name =
           let rec aux depth env =
             try (depth, Hashmap.find name env.symbols) with Not_found -> (
@@ -166,10 +168,10 @@ let analyze asts =
         match find_symbol env name with
         | 0, sym -> sym
         | _ -> failwith "[FATAL] variable not found in pattern analysis" )
-    | PtnAlias (ptn, (Var _ as var)) ->
-        PtnAlias (aux_ptn env ptn, aux_ptn env var)
-    | PtnOr (lhs, rhs) -> PtnOr (aux_ptn env lhs, aux_ptn env rhs)
-    | CtorApp (None, ctorname, arg) ->
+    | P.PtnAlias (ptn, (P.Var _ as var)) ->
+        P.PtnAlias (aux_ptn env ptn, aux_ptn env var)
+    | P.PtnOr (lhs, rhs) -> P.PtnOr (aux_ptn env lhs, aux_ptn env rhs)
+    | P.CtorApp (None, ctorname, arg) ->
         let arg =
           match arg with Some arg -> Some (aux_ptn env arg) | _ -> None
         in
@@ -177,7 +179,7 @@ let analyze asts =
           try hashtbl_find_with_modulename toplevel.ctors_type ctorname
           with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
         in
-        CtorApp (Some typename, ctorname_or_expname, arg)
+        P.CtorApp (Some typename, ctorname_or_expname, arg)
     | _ -> failwith "unexpected pattern"
   in
   let rec analyze_pattern_match_cases env cases =
@@ -192,13 +194,15 @@ let analyze asts =
       cases
   and aux env ast =
     match ast with
-    | IntValue _ | CharValue _ | UnitValue | EmptyList -> ast
-    | StringValue _ ->
+    | P.IntValue _ | P.CharValue _ | P.UnitValue | P.EmptyList -> ast
+    | P.StringValue _ ->
         toplevel.strings <- ast :: toplevel.strings ;
         ast
-    | TupleValue values -> TupleValue (List.map (fun x -> aux env x) values)
-    | ArrayValue values -> ArrayValue (List.map (fun x -> aux env x) values)
-    | RecordValue (None, fields) ->
+    | P.TupleValue values ->
+        P.TupleValue (List.map (fun x -> aux env x) values)
+    | P.ArrayValue values ->
+        P.ArrayValue (List.map (fun x -> aux env x) values)
+    | P.RecordValue (None, fields) ->
         let key_fieldname, _ = List.hd fields in
         let full_key_fieldname, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
@@ -208,12 +212,12 @@ let analyze asts =
           @@ String.rindex full_key_fieldname '.' )
           ^ "."
         in
-        RecordValue
+        P.RecordValue
           ( Some typename
           , List.map
               (fun (name, ast) -> (name_prefix ^ name, aux env ast))
               fields )
-    | RecordValueWith (None, base, fields, None) ->
+    | P.RecordValueWith (None, base, fields, None) ->
         let key_fieldname, _ = List.hd fields in
         let full_key_fieldname, typename =
           hashtbl_find_with_modulename toplevel.records key_fieldname
@@ -235,94 +239,96 @@ let analyze asts =
             (fun fieldname -> not @@ Hashmap.mem fieldname fields)
             fieldnames
         in
-        RecordValueWith
+        P.RecordValueWith
           (Some typename, aux env base, fields, Some comp_fieldnames)
-    | RecordDotAccess (None, ast, fieldname) ->
+    | P.RecordDotAccess (None, ast, fieldname) ->
         let fieldname, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
-        RecordDotAccess (Some typename, aux env ast, fieldname)
-    | Cons (car, cdr) -> Cons (aux env car, aux env cdr)
-    | Add (lhs, rhs) -> Add (aux env lhs, aux env rhs)
-    | Sub (lhs, rhs) -> Sub (aux env lhs, aux env rhs)
-    | Mul (lhs, rhs) -> Mul (aux env lhs, aux env rhs)
-    | Div (lhs, rhs) -> Div (aux env lhs, aux env rhs)
-    | Rem (lhs, rhs) -> Rem (aux env lhs, aux env rhs)
-    | LogicalLeftShift (lhs, rhs) -> LogicalLeftShift (aux env lhs, aux env rhs)
-    | LogicalRightShift (lhs, rhs) ->
-        LogicalRightShift (aux env lhs, aux env rhs)
-    | ArithmeticRightShift (lhs, rhs) ->
-        ArithmeticRightShift (aux env lhs, aux env rhs)
-    | BitwiseAnd (lhs, rhs) -> BitwiseAnd (aux env lhs, aux env rhs)
-    | BitwiseOr (lhs, rhs) -> BitwiseOr (aux env lhs, aux env rhs)
-    | StringConcat (lhs, rhs) -> StringConcat (aux env lhs, aux env rhs)
-    | ListConcat (lhs, rhs) -> ListConcat (aux env lhs, aux env rhs)
-    | RefAssign (lhs, rhs) -> RefAssign (aux env lhs, aux env rhs)
-    | RecordAssign (None, lhs, fieldname, rhs) ->
+        P.RecordDotAccess (Some typename, aux env ast, fieldname)
+    | P.Cons (car, cdr) -> P.Cons (aux env car, aux env cdr)
+    | P.Add (lhs, rhs) -> P.Add (aux env lhs, aux env rhs)
+    | P.Sub (lhs, rhs) -> P.Sub (aux env lhs, aux env rhs)
+    | P.Mul (lhs, rhs) -> P.Mul (aux env lhs, aux env rhs)
+    | P.Div (lhs, rhs) -> P.Div (aux env lhs, aux env rhs)
+    | P.Rem (lhs, rhs) -> P.Rem (aux env lhs, aux env rhs)
+    | P.LogicalLeftShift (lhs, rhs) ->
+        P.LogicalLeftShift (aux env lhs, aux env rhs)
+    | P.LogicalRightShift (lhs, rhs) ->
+        P.LogicalRightShift (aux env lhs, aux env rhs)
+    | P.ArithmeticRightShift (lhs, rhs) ->
+        P.ArithmeticRightShift (aux env lhs, aux env rhs)
+    | P.BitwiseAnd (lhs, rhs) -> P.BitwiseAnd (aux env lhs, aux env rhs)
+    | P.BitwiseOr (lhs, rhs) -> P.BitwiseOr (aux env lhs, aux env rhs)
+    | P.StringConcat (lhs, rhs) -> P.StringConcat (aux env lhs, aux env rhs)
+    | P.ListConcat (lhs, rhs) -> P.ListConcat (aux env lhs, aux env rhs)
+    | P.RefAssign (lhs, rhs) -> P.RefAssign (aux env lhs, aux env rhs)
+    | P.RecordAssign (None, lhs, fieldname, rhs) ->
         let fieldname, typename =
           hashtbl_find_with_modulename toplevel.records fieldname
         in
-        RecordAssign (Some typename, aux env lhs, fieldname, aux env rhs)
-    | Deref ast -> Deref (aux env ast)
-    | Negate ast -> Negate (aux env ast)
-    | Positate ast -> Positate (aux env ast)
-    | StructEqual (lhs, rhs) -> StructEqual (aux env lhs, aux env rhs)
-    | StructInequal (lhs, rhs) -> StructInequal (aux env lhs, aux env rhs)
-    | LessThan (lhs, rhs) -> LessThan (aux env lhs, aux env rhs)
-    | LessThanEqual (lhs, rhs) -> LessThanEqual (aux env lhs, aux env rhs)
-    | LogicalAnd (lhs, rhs) -> LogicalAnd (aux env lhs, aux env rhs)
-    | LogicalOr (lhs, rhs) -> LogicalOr (aux env lhs, aux env rhs)
-    | IfThenElse (cond, then_body, Some else_body) ->
-        IfThenElse (aux env cond, aux env then_body, Some (aux env else_body))
-    | IfThenElse (cond, then_body, None) ->
-        IfThenElse (aux env cond, aux env then_body, None)
-    | ExprSeq exprs -> ExprSeq (List.map (fun x -> aux env x) exprs)
-    | Lambda (args, body) ->
+        P.RecordAssign (Some typename, aux env lhs, fieldname, aux env rhs)
+    | P.Deref ast -> P.Deref (aux env ast)
+    | P.Negate ast -> P.Negate (aux env ast)
+    | P.Positate ast -> P.Positate (aux env ast)
+    | P.StructEqual (lhs, rhs) -> P.StructEqual (aux env lhs, aux env rhs)
+    | P.StructInequal (lhs, rhs) -> P.StructInequal (aux env lhs, aux env rhs)
+    | P.LessThan (lhs, rhs) -> P.LessThan (aux env lhs, aux env rhs)
+    | P.LessThanEqual (lhs, rhs) -> P.LessThanEqual (aux env lhs, aux env rhs)
+    | P.LogicalAnd (lhs, rhs) -> P.LogicalAnd (aux env lhs, aux env rhs)
+    | P.LogicalOr (lhs, rhs) -> P.LogicalOr (aux env lhs, aux env rhs)
+    | P.IfThenElse (cond, then_body, Some else_body) ->
+        P.IfThenElse (aux env cond, aux env then_body, Some (aux env else_body))
+    | P.IfThenElse (cond, then_body, None) ->
+        P.IfThenElse (aux env cond, aux env then_body, None)
+    | P.ExprSeq exprs -> P.ExprSeq (List.map (fun x -> aux env x) exprs)
+    | P.Lambda (args, body) ->
         let funcname = ".lambda" in
         aux env
-        @@ LetAnd (false, [(Var funcname :: args, body)], Some (Var funcname))
-    | StringGet (str, idx) ->
+        @@ P.LetAnd
+             (false, [(P.Var funcname :: args, body)], Some (P.Var funcname))
+    | P.StringGet (str, idx) ->
         (* a.[b] returns a b-th character of a string a.
          * Therefore, convert it to String.get call *)
-        aux env @@ AppCls (Var "String.get", [str; idx])
-    | StringSet (str, idx, ast) ->
-        aux env @@ AppCls (Var "String.set", [str; idx; ast])
-    | ArrayGet (ary, idx) ->
+        aux env @@ P.AppCls (P.Var "String.get", [str; idx])
+    | P.StringSet (str, idx, ast) ->
+        aux env @@ P.AppCls (P.Var "String.set", [str; idx; ast])
+    | P.ArrayGet (ary, idx) ->
         (* a.(b) returns b-th item of array a.
          * Therefore, convert it to Array.get call *)
-        aux env @@ AppCls (Var "Array.get", [ary; idx])
-    | TryWith (cond, cases) ->
-        TryWith (aux env cond, analyze_pattern_match_cases env cases)
-    | MatchWith (cond, cases) ->
-        MatchWith (aux env cond, analyze_pattern_match_cases env cases)
-    | Var name -> (
+        aux env @@ P.AppCls (P.Var "Array.get", [ary; idx])
+    | P.TryWith (cond, cases) ->
+        P.TryWith (aux env cond, analyze_pattern_match_cases env cases)
+    | P.MatchWith (cond, cases) ->
+        P.MatchWith (aux env cond, analyze_pattern_match_cases env cases)
+    | P.Var name -> (
       match find_symbol env name with
-      | 0, (Var _ as sym) -> sym
-      | _, FuncVar (gen_funcname, 0) -> AppDir (gen_funcname, [])
-      | 0, FuncVar (funcname, nargs) ->
-          (* When FuncVar is processed here, AppDir will not be applied to this FuncVar.
+      | 0, (P.Var _ as sym) -> sym
+      | _, P.FuncVar (gen_funcname, 0) -> P.AppDir (gen_funcname, [])
+      | 0, P.FuncVar (funcname, nargs) ->
+          (* When P.FuncVar is processed here, P.AppDir will not be applied to this P.FuncVar.
            * Therefore the returned value should be closured in case
-           * AppCls is applied to this value. *)
-          MakeCls (funcname, nargs, [])
-      | _, (Var id as sym) ->
+           * P.AppCls is applied to this value. *)
+          P.MakeCls (funcname, nargs, [])
+      | _, (P.Var id as sym) ->
           env.freevars := (name, id) :: !(env.freevars) ;
           sym
       | _ -> failwith @@ sprintf "not found variable in analysis: %s" name )
-    | CtorApp (None, ctorname, None) ->
+    | P.CtorApp (None, ctorname, None) ->
         let ctorname_or_expname, typename =
           try hashtbl_find_with_modulename toplevel.ctors_type ctorname
           with Not_found -> hashtbl_find_with_modulename toplevel.exps ctorname
         in
-        CtorApp (Some typename, ctorname_or_expname, None)
-    | TypeAnd entries ->
+        P.CtorApp (Some typename, ctorname_or_expname, None)
+    | P.TypeAnd entries ->
         toplevel.typedefs
         <- List.rev_append toplevel.typedefs
            @@ List.map
                 (function
-                  | DefTypeAlias (type_param, typename, typ) ->
+                  | P.DefTypeAlias (type_param, typename, typ) ->
                       let typename = with_modulename typename in
-                      DefTypeAlias (type_param, typename, typ)
-                  | DefVariant (type_param, typename, ctornames) ->
+                      P.DefTypeAlias (type_param, typename, typ)
+                  | P.DefVariant (type_param, typename, ctornames) ->
                       let typename = with_modulename typename in
                       let ctornames =
                         List.map
@@ -334,8 +340,8 @@ let analyze asts =
                         (fun (ctorname, _) ->
                           Hashtbl.add toplevel.ctors_type ctorname typename )
                         ctornames ;
-                      DefVariant (type_param, typename, ctornames)
-                  | DefRecord (typename, fields) ->
+                      P.DefVariant (type_param, typename, ctornames)
+                  | P.DefRecord (typename, fields) ->
                       let typename = with_modulename typename in
                       let fields =
                         List.map
@@ -349,42 +355,42 @@ let analyze asts =
                         fields ;
                       Hashtbl.add toplevel.records_fields typename
                       @@ List.map (fun (fieldname, _) -> fieldname) fields ;
-                      DefRecord (typename, fields))
+                      P.DefRecord (typename, fields))
                 entries ;
-        Nope
-    | ExpDef (expname, components) ->
+        P.Nope
+    | P.ExpDef (expname, components) ->
         let expname = with_modulename expname in
         Hashtbl.add toplevel.exps expname expname ;
         toplevel.exps_list <- expname :: toplevel.exps_list ;
-        Nope
-    | OpenModuleDef modname ->
+        P.Nope
+    | P.OpenModuleDef modname ->
         let _, modname =
           hashtbl_find_with_modulename toplevel.modules (modname ^ ".")
         in
         toplevel.opened_modulename
         <- with_modulename modname :: modname :: toplevel.opened_modulename ;
-        Nope
-    | AppCls ((CtorApp (None, ctorname, None) as ctor), args) -> (
+        P.Nope
+    | P.AppCls ((P.CtorApp (None, ctorname, None) as ctor), args) -> (
       match aux env ctor with
-      | CtorApp (typename, ctorname, None) when List.length args = 1 ->
-          CtorApp (typename, ctorname, Some (aux env @@ List.hd args))
-      | _ -> failwith "invalid CtorApp" )
-    | AppCls ((Var funcname as var), args) -> (
+      | P.CtorApp (typename, ctorname, None) when List.length args = 1 ->
+          P.CtorApp (typename, ctorname, Some (aux env @@ List.hd args))
+      | _ -> failwith "invalid P.CtorApp" )
+    | P.AppCls ((P.Var funcname as var), args) -> (
       try
         match
           match find_symbol env funcname with
           (* the symbol is 'safe' when it's in the same env
            * or it can be called by its name *)
-          | 0, sym | _, (FuncVar _ as sym) -> sym
-          | _, (Var id as sym) ->
+          | 0, sym | _, (P.FuncVar _ as sym) -> sym
+          | _, (P.Var id as sym) ->
               env.freevars := (funcname, id) :: !(env.freevars) ;
               sym
           | _ ->
               failwith @@ sprintf "not found variable in analysis: %s" funcname
         with
-        | FuncVar (gen_funcname, nargs) ->
+        | P.FuncVar (gen_funcname, nargs) ->
             let args = List.map (fun x -> aux env x) args in
-            if List.length args = nargs then AppDir (gen_funcname, args)
+            if List.length args = nargs then P.AppDir (gen_funcname, args)
             else
               let rec split n lst =
                 if n = 0 then ([], lst)
@@ -400,58 +406,58 @@ let analyze asts =
                            gen_funcname
               in
               let head, tail = split nargs args in
-              AppCls (AppDir (gen_funcname, head), tail)
-        | Var varname ->
-            AppCls (aux env var, List.map (fun x -> aux env x) args)
+              P.AppCls (P.AppDir (gen_funcname, head), tail)
+        | P.Var varname ->
+            P.AppCls (aux env var, List.map (fun x -> aux env x) args)
         | _ -> raise Not_found
       with Not_found ->
-        failwith (sprintf "not found in analysis (AppCls): %s" funcname) )
-    | AppCls (func, args) ->
-        AppCls (aux env func, List.map (fun x -> aux env x) args)
-    | ForLoop (dir, indexname, expr1, expr2, expr3) ->
+        failwith (sprintf "not found in analysis (P.AppCls): %s" funcname) )
+    | P.AppCls (func, args) ->
+        P.AppCls (aux env func, List.map (fun x -> aux env x) args)
+    | P.ForLoop (dir, indexname, expr1, expr2, expr3) ->
         let gen_indexname = make_id indexname in
         let env' =
           { env with
-            symbols= Hashmap.add indexname (Var gen_indexname) env.symbols }
+            symbols= Hashmap.add indexname (P.Var gen_indexname) env.symbols }
         in
         let expr1 = aux env expr1 in
         let expr2 = aux env expr2 in
         let expr3 = aux env' expr3 in
-        ForLoop (dir, gen_indexname, expr1, expr2, expr3)
-    | LetAnd (recursive, lhs_of_in, rhs_of_in) ->
-        (* Split rhs_of_eq into LetVar and LetFunc. At the same time,
+        P.ForLoop (dir, gen_indexname, expr1, expr2, expr3)
+    | P.LetAnd (recursive, lhs_of_in, rhs_of_in) ->
+        (* Split rhs_of_eq into P.LetVar and P.LetFunc. At the same time,
          * make a conversion table for function names *)
         let rec bind_with_modulename = function
-          | ( IntValue _ | CharValue _ | UnitValue | EmptyList | PtnRange _
-            | StringValue _ ) as ptn ->
+          | ( P.IntValue _ | P.CharValue _ | P.UnitValue | P.EmptyList
+            | P.PtnRange _ | P.StringValue _ ) as ptn ->
               ptn
-          | TupleValue values ->
-              TupleValue (List.map (fun x -> bind_with_modulename x) values)
-          | Cons (car, cdr) ->
-              Cons (bind_with_modulename car, bind_with_modulename cdr)
-          | PtnAlias (ptn, (Var _ as var)) ->
-              PtnAlias (bind_with_modulename ptn, bind_with_modulename var)
-          | PtnOr (lhs, rhs) ->
-              PtnOr (bind_with_modulename lhs, bind_with_modulename rhs)
-          | CtorApp (None, ctorname, arg) ->
+          | P.TupleValue values ->
+              P.TupleValue (List.map (fun x -> bind_with_modulename x) values)
+          | P.Cons (car, cdr) ->
+              P.Cons (bind_with_modulename car, bind_with_modulename cdr)
+          | P.PtnAlias (ptn, (P.Var _ as var)) ->
+              P.PtnAlias (bind_with_modulename ptn, bind_with_modulename var)
+          | P.PtnOr (lhs, rhs) ->
+              P.PtnOr (bind_with_modulename lhs, bind_with_modulename rhs)
+          | P.CtorApp (None, ctorname, arg) ->
               let arg =
                 match arg with
                 | Some arg -> Some (bind_with_modulename arg)
                 | _ -> None
               in
-              CtorApp (None, ctorname, arg)
-          | Var name ->
+              P.CtorApp (None, ctorname, arg)
+          | P.Var name ->
               (* This process is the key. In this function,
                * we put the current module name to the defined variables *)
-              Var (with_modulename name)
+              P.Var (with_modulename name)
           | _ -> failwith "unexpected pattern"
         in
         let funcnames2gen = Hashtbl.create 2 in
         let src =
           List.map
             (function
-              | [Var funcname], rhs_of_eq when recursive ->
-                  (* When recursive, LetVar should be LetFunc with no arguments. *)
+              | [P.Var funcname], rhs_of_eq when recursive ->
+                  (* When recursive, P.LetVar should be P.LetFunc with no arguments. *)
                   (* TODO:
                     If the lhs doesn't have any freevars, then there is no need to convert it.
                     Also, we should check whether the lhs uses itself in a correct way e.g.
@@ -466,31 +472,31 @@ let analyze asts =
                     | None -> with_modulename funcname
                   in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
-                  LetFunc (true, funcname, [], rhs_of_eq, [])
+                  P.LetFunc (true, funcname, [], rhs_of_eq, [])
               | [bind], rhs_of_eq ->
                   let bind =
                     match rhs_of_in with
                     | None -> bind_with_modulename bind
                     | Some _ -> bind
                   in
-                  LetVar (recursive, bind, rhs_of_eq)
-              | Var funcname :: args, rhs_of_eq ->
+                  P.LetVar (recursive, bind, rhs_of_eq)
+              | P.Var funcname :: args, rhs_of_eq ->
                   let funcname =
                     match rhs_of_in with
                     | Some _ -> funcname
                     | None -> with_modulename funcname
                   in
                   Hashtbl.add funcnames2gen funcname (make_id funcname) ;
-                  LetFunc (recursive, funcname, args, rhs_of_eq, [])
+                  P.LetFunc (recursive, funcname, args, rhs_of_eq, [])
               | _ -> failwith "unexpected ast")
             lhs_of_in
         in
-        (* Now, analyze all LetVar/LetFunc.
-         * When we analyze *recursive* LetFunc, we must decide whether
+        (* Now, analyze all P.LetVar/P.LetFunc.
+         * When we analyze *recursive* P.LetFunc, we must decide whether
          * we should call this function by name or as closure in itself.
-         * Therefore, first, we assume that we can call them by name i.e. we use FuncVar.
+         * Therefore, first, we assume that we can call them by name i.e. we use P.FuncVar.
          * Next, if we find we can't do so (i.e. there are any freevars), we decide to call them as closure,
-         * that is, use Var, and analyze it again.
+         * that is, use P.Var, and analyze it again.
          * I (ushitora-anqou) 'pakutta' or borrowed this idea from MinCaml.
          * TODO: is there better way?*)
         let let_closures_freevars = ref [] in
@@ -502,24 +508,25 @@ let analyze asts =
             hashmap_of_list
             @@ filter_after_map
                  (function
-                   | LetFunc (_, funcname, args, _, _) ->
+                   | P.LetFunc (_, funcname, args, _, _) ->
                        let gen_funcname =
                          Hashtbl.find funcnames2gen funcname
                        in
                        Some
                          ( if first then
-                           (funcname, FuncVar (gen_funcname, List.length args))
-                         else (funcname, Var gen_funcname) )
+                           ( funcname
+                           , P.FuncVar (gen_funcname, List.length args) )
+                         else (funcname, P.Var gen_funcname) )
                    | _ -> None)
                  src
           in
           let rec aux' env' = function
-            | LetVar (false, bind, lhs) ->
+            | P.LetVar (false, bind, lhs) ->
                 let env' =
                   {env' with symbols= add_symbols_in_pattern env'.symbols bind}
                 in
-                (env', LetVar (false, aux_ptn env' bind, aux env lhs))
-            | LetFunc (recursive, funcname, args, func, _) ->
+                (env', P.LetVar (false, aux_ptn env' bind, aux env lhs))
+            | P.LetFunc (recursive, funcname, args, func, _) ->
                 let gen_funcname = Hashtbl.find funcnames2gen funcname in
                 let env_in =
                   { symbols= add_symbols_in_patterns Hashmap.empty args
@@ -541,7 +548,7 @@ let analyze asts =
                   (* Save data for the possible second loop *)
                   let_closures_freevars := !freevars @ !let_closures_freevars ;
                   (* If the function is recursive and should call itself as a closure,
-                   * then Var should be used rather than FuncVar *)
+                   * then P.Var should be used rather than P.FuncVar *)
                   if recursive && List.length !freevars <> 0 then
                     should_be_closure := true ;
                   if !should_be_closure then raise Should_be_closure ) ;
@@ -553,18 +560,18 @@ let analyze asts =
                      * Note that these closures should have *all* freevars in chained functions. *)
                     (* TODO: only functions appeared in freevars need to be available. *)
                     freevars := !let_closures_freevars ;
-                    LetAndAnalyzed
+                    P.LetAndAnalyzed
                       ( filter_after_map
                           (function
-                            | LetFunc (_, funcname, args, _, _) ->
+                            | P.LetFunc (_, funcname, args, _, _) ->
                                 let gen_funcname =
                                   Hashtbl.find funcnames2gen funcname
                                 in
                                 Some
-                                  (LetVar
+                                  (P.LetVar
                                      ( false
-                                     , Var gen_funcname
-                                     , MakeCls
+                                     , P.Var gen_funcname
+                                     , P.MakeCls
                                          ( gen_funcname
                                          , List.length args
                                          , !let_closures_freevars ) ))
@@ -584,11 +591,11 @@ let analyze asts =
                     { env' with
                       symbols=
                         Hashmap.add funcname
-                          (FuncVar (gen_funcname, List.length args))
+                          (P.FuncVar (gen_funcname, List.length args))
                           env'.symbols }
                   in
                   let ast =
-                    LetFunc
+                    P.LetFunc
                       ( recursive
                       , gen_funcname
                       , List.map (fun x -> aux_ptn env_in x) args
@@ -599,13 +606,13 @@ let analyze asts =
                   (env_out, ast) )
                 else
                   (* closure *)
-                  let funcvar = Var gen_funcname in
+                  let funcvar = P.Var gen_funcname in
                   let env_out =
                     { env' with
                       symbols= Hashmap.add funcname funcvar env'.symbols }
                   in
                   let ast =
-                    LetFunc
+                    P.LetFunc
                       ( recursive
                       , gen_funcname
                       , List.map (fun x -> aux_ptn env_in x) args
@@ -614,22 +621,22 @@ let analyze asts =
                   in
                   toplevel.letfuncs <- ast :: toplevel.letfuncs ;
                   ( env_out
-                  , LetVar
+                  , P.LetVar
                       ( false
                       , funcvar
-                      , MakeCls (gen_funcname, List.length args, !freevars) )
-                  )
-            | _ -> raise Unexpected_ast
+                      , P.MakeCls (gen_funcname, List.length args, !freevars)
+                      ) )
+            | _ -> raise P.Unexpected_ast
           in
           let env', lets =
             List.fold_left
               (fun (env', lets) le ->
                 try
                   match le with
-                  | LetVar _ ->
+                  | P.LetVar _ ->
                       let env', le_analyzed = aux' env' le in
                       (env', le_analyzed :: lets)
-                  | LetFunc _ ->
+                  | P.LetFunc _ ->
                       let env', le_analyzed = aux' env' le in
                       (env', le_analyzed :: lets)
                   | _ -> failwith "unexpected ast"
@@ -644,14 +651,14 @@ let analyze asts =
           else
             match rhs_of_in with
             | None -> raise (LetDef (lets, env'))
-            | Some rhs -> LetAndAnalyzed (lets, aux env' rhs)
+            | Some rhs -> P.LetAndAnalyzed (lets, aux env' rhs)
         in
         analyze_lets true
-    | _ -> raise Unexpected_ast
+    | _ -> raise P.Unexpected_ast
   and analyze_module env exprs =
     let toplevel_env = ref env in
     let rec aux' exprs = function
-      | ModuleAlias (modname, src_modname) :: asts ->
+      | P.ModuleAlias (modname, src_modname) :: asts ->
           let _, src_modname =
             hashtbl_find_with_modulename toplevel.modules @@ src_modname ^ "."
           in
@@ -659,20 +666,20 @@ let analyze asts =
             (get_modulename_prefix (modname :: toplevel.modulename))
             src_modname ;
           aux' exprs asts
-      | ModuleDef (this_modulename, body) :: asts ->
+      | P.ModuleDef (this_modulename, body) :: asts ->
           toplevel.modulename <- this_modulename :: toplevel.modulename ;
           (* TODO: is there any better way? *)
-          aux' exprs @@ body @ (ModuleDefEnd :: asts)
-      | ModuleDefEnd :: asts ->
+          aux' exprs @@ body @ (P.ModuleDefEnd :: asts)
+      | P.ModuleDefEnd :: asts ->
           let full_modname = get_modulename_prefix toplevel.modulename in
           Hashtbl.add toplevel.modules full_modname full_modname ;
           toplevel.modulename <- List.tl toplevel.modulename ;
           aux' exprs asts
-      | ExternalDecl (id, typexpr, decl) :: asts ->
+      | P.ExternalDecl (id, typexpr, decl) :: asts ->
           let id = with_modulename id in
           let nargs =
             let rec aux cnt = function
-              | TyFunc (lhs, rhs) -> aux (cnt + 1) rhs
+              | Type.Func (lhs, rhs) -> aux (cnt + 1) rhs
               | _ -> cnt
             in
             aux 0 typexpr
@@ -680,14 +687,15 @@ let analyze asts =
           toplevel_env :=
             { !toplevel_env with
               symbols=
-                Hashmap.add id (FuncVar (decl, nargs)) !toplevel_env.symbols } ;
+                Hashmap.add id (P.FuncVar (decl, nargs)) !toplevel_env.symbols
+            } ;
           aux' exprs asts
       | ast :: asts -> (
         try aux' (aux !toplevel_env ast :: exprs) asts
         with LetDef (lets, env) ->
           toplevel_env := env ;
           exprs2expr @@ List.rev
-          @@ (LetAndAnalyzed (lets, aux' [] asts) :: exprs) )
+          @@ (P.LetAndAnalyzed (lets, aux' [] asts) :: exprs) )
       | [] -> exprs2expr @@ List.rev exprs
     in
     let ast = aux' [] exprs in
@@ -695,6 +703,6 @@ let analyze asts =
   in
   let env = {symbols= Hashmap.empty; parent= None; freevars= ref []} in
   let _, ast = analyze_module env asts in
-  let ast = LetFunc (false, "aqaml_main", [UnitValue], ast, []) in
+  let ast = P.LetFunc (false, "aqaml_main", [P.UnitValue], ast, []) in
   toplevel.letfuncs <- ast :: toplevel.letfuncs ;
   (toplevel.letfuncs, toplevel.strings, toplevel.typedefs, toplevel.exps_list)

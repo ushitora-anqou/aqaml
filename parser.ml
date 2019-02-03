@@ -1,17 +1,5 @@
 module L = Lexer
-
-type typ =
-  | TyInt
-  | TyChar
-  | TyUnit
-  | TyBool
-  | TyString
-  | TyTuple of typ list
-  | TyCustom of string
-  | TyVar of string
-  | TyCtorApp of typ * string
-  | TyArgs of typ list
-  | TyFunc of typ * typ
+module T = Type
 
 type ast =
   | UnitValue
@@ -65,7 +53,7 @@ type ast =
   | RefAssign of ast * ast
   | RecordAssign of string option * ast * string * ast
   | Deref of ast
-  | ExpDef of string * typ option
+  | ExpDef of string * T.t option
   | TryWith of ast * (pattern * ast option * ast) list
   | StringGet of ast * ast
   | StringSet of ast * ast * ast
@@ -76,7 +64,7 @@ type ast =
   | ModuleDef of string * ast list
   (* for analysis *)
   | ModuleDefEnd
-  | ExternalDecl of string * typ * string
+  | ExternalDecl of string * T.t * string
   | OpenModuleDef of string
   (* TODO: module Ptn *)
   | PtnOr of pattern * pattern
@@ -86,9 +74,9 @@ type ast =
 and pattern = ast
 
 and typedef =
-  | DefVariant of typ option * string * (string * typ option) list
-  | DefTypeAlias of typ option * string * typ
-  | DefRecord of string * (string * typ) list
+  | DefVariant of T.t option * string * (string * T.t option) list
+  | DefTypeAlias of T.t option * string * T.t
+  | DefRecord of string * (string * T.t) list
 
 and for_loop_dir = ForTo | ForDownto
 
@@ -615,14 +603,14 @@ let parse tokens =
     | _ -> (tokens, ptn)
   and parse_pattern tokens = parse_pattern_as tokens
   and parse_typexpr_primary = function
-    | L.Int :: tokens -> (tokens, TyInt)
-    | L.Char :: tokens -> (tokens, TyChar)
-    | L.Unit :: tokens -> (tokens, TyUnit)
-    | L.Bool :: tokens -> (tokens, TyBool)
-    | L.String :: tokens -> (tokens, TyString)
-    | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, TyVar id)
+    | L.Int :: tokens -> (tokens, T.Int)
+    | L.Char :: tokens -> (tokens, T.Char)
+    | L.Unit :: tokens -> (tokens, T.Unit)
+    | L.Bool :: tokens -> (tokens, T.Bool)
+    | L.String :: tokens -> (tokens, T.String)
+    | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, T.Var id)
     | (L.LowerIdent typename | L.LowerIdentWithModule typename) :: tokens ->
-        (tokens, TyCustom typename)
+        (tokens, T.Custom typename)
     | L.LParen :: _ ->
         failwith
           "Any token L.LParen should be handled in parse_typexpr_ctor_app"
@@ -642,13 +630,13 @@ let parse tokens =
           let tokens, types = aux [typexpr] tokens in
           let types = List.rev types in
           ( tokens
-          , if List.length types = 1 then List.hd types else TyArgs types )
+          , if List.length types = 1 then List.hd types else T.Args types )
       | _ -> parse_typexpr_primary tokens
     in
     let rec aux lhs = function
       | (L.LowerIdent typectorname | L.LowerIdentWithModule typectorname)
         :: tokens ->
-          aux (TyCtorApp (lhs, typectorname)) tokens
+          aux (T.CtorApp (lhs, typectorname)) tokens
       | tokens -> (tokens, lhs)
     in
     aux lhs tokens
@@ -664,18 +652,18 @@ let parse tokens =
     match typexprs with
     | [] -> L.raise_unexpected_token []
     | [typexpr] -> (tokens, typexpr)
-    | typexprs -> (tokens, TyTuple typexprs)
+    | typexprs -> (tokens, T.Tuple typexprs)
   and parse_typexpr_func tokens =
     let tokens, lhs = parse_typexpr_tuple tokens in
     match tokens with
     | L.Arrow :: tokens ->
         let tokens, rhs = parse_typexpr_func tokens in
-        (tokens, TyFunc (lhs, rhs))
+        (tokens, T.Func (lhs, rhs))
     | _ -> (tokens, lhs)
   and parse_typexpr tokens = parse_typexpr_func tokens
   and parse_type_def tokens =
     let parse_type_param = function
-      | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, TyVar id)
+      | L.Apostrophe :: L.LowerIdent id :: tokens -> (tokens, T.Var id)
       | x -> L.raise_unexpected_token x
     in
     let parse_type_params = function
@@ -684,7 +672,7 @@ let parse tokens =
             | L.Comma :: tokens ->
                 let tokens, type_param = parse_type_param tokens in
                 aux (type_param :: type_params) tokens
-            | L.RParen :: tokens -> (tokens, TyTuple type_params)
+            | L.RParen :: tokens -> (tokens, T.Tuple type_params)
             | x -> L.raise_unexpected_token x
           in
           let tokens, type_param = parse_type_param tokens in
