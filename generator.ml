@@ -1133,6 +1133,12 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "push r13" ;
     appstr buf "push r14" ;
     appstr buf "mov r14, rsp" ;
+    (* set start address of stack *)
+    appstr buf ".data" ;
+    appstr buf "aqaml_initial_rsp:" ;
+    appstr buf ".zero 8" ;
+    appstr buf ".text" ;
+    appstr buf "mov [rip + aqaml_initial_rsp], rsp" ;
     (* give unit value as an argument *)
     appfmt buf "mov rax, %d" @@ tagged_int 0 ;
     appstr buf "call aqaml_main" ;

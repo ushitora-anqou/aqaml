@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern uint64_t aqaml_initial_rsp;
+
 typedef struct AQamlValue {
     enum {
         AQAML_INTEGER,
