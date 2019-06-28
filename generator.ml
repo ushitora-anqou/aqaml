@@ -63,13 +63,32 @@ let rec generate (letfuncs, strings, typedefs, exps) =
   let tag_int reg = sprintf "lea %s, [%s + %s + 1]" reg reg reg in
   let untag_int reg = sprintf "sar %s, 1" reg in
   let tagged_int num = (num lsl 1) lor 1 in
+  let gen_call_with_aligned_rsp callee =
+    let buf = Buffer.create 128 in
+    let just_call_label = make_label () in
+    let exit_label = make_label () in
+    appstr buf "mov rax, rsp" ;
+    appstr buf "and rax, 0x0f" ;
+    appstr buf "cmp rax, 0" ;
+    appfmt buf "je %s" just_call_label ;
+    (* rsp is not 16-byte aligned BUT 8-byte aligned *)
+    appstr buf "sub rsp, 8" ;
+    appfmt buf "call %s" callee ;
+    appstr buf "add rsp, 8" ;
+    appfmt buf "jmp %s" exit_label ;
+    appfmt buf "%s:" just_call_label ;
+    appfmt buf "call %s" callee ;
+    appfmt buf "%s:" exit_label ;
+    Buffer.contents buf
+  in
   let rec gen_alloc_block size color tag =
     (* allocated block address is in rax *)
     let buf = Buffer.create 128 in
     appfmt buf "mov rdi, %d" size ;
     appfmt buf "mov rsi, %d" color ;
     appfmt buf "mov rdx, %d" tag ;
-    appstr buf "call aqaml_alloc_block@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_alloc_block@PLT" ;
+    (* appstr buf "call aqaml_alloc_block@PLT" ; *)
     Buffer.contents buf
   in
   let rec gen_assign_pattern env exp_label = function
@@ -947,7 +966,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
         | _ ->
             failwith "C function with more than 6 arguments can't be handled."
       done ;
-      appfmt buf "call %s_detail@PLT" funcname ;
+      appstr buf @@ gen_call_with_aligned_rsp @@ sprintf "%s_detail@PLT" funcname ;
+      (* appfmt buf "call %s_detail@PLT" funcname ; *)
       ( match ret_type with
       | CTyInt -> appstr buf @@ tag_int "rax"
       | CTyUnit -> appfmt buf "mov rax, %d" @@ tagged_int 0
@@ -989,7 +1009,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_input_char:" ;
     let exit_label = make_label () in
     appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_input_char_detail@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_input_char_detail@PLT" ;
+    (* appstr buf "call aqaml_input_char_detail@PLT" ; *)
     appstr buf "cmp rax, -1" ;
     appfmt buf "jne %s" exit_label ;
     appstr buf @@ gen_raise_exp_of "Stdlib.End_of_file" false ;
@@ -999,7 +1020,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_open_in:" ;
     let exit_label = make_label () in
     appstr buf "mov rdi, rax" ;
-    appstr buf "call aqaml_open_in_detail@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_open_in_detail@PLT" ;
+    (* appstr buf "call aqaml_open_in_detail@PLT" ; *)
     appstr buf "cmp rax, 0" ;
     appfmt buf "jne %s" exit_label ;
     (* TODO: raise 'No such file or directory *)
@@ -1011,7 +1033,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "aqaml_structural_inequal:" ;
     appstr buf "mov rdi, rax" ;
     appstr buf "mov rsi, rbx" ;
-    appstr buf "call aqaml_structural_equal_detail@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_structural_equal_detail@PLT" ;
+    (* appstr buf "call aqaml_structural_equal_detail@PLT" ; *)
     appstr buf "test eax, eax" ;
     appstr buf "sete al" ;
     appstr buf @@ tag_int "rax" ;
@@ -1101,7 +1124,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "push rdi" ;
     appstr buf "mov rsi, 0" ;
     appstr buf "mov rdx, 1" ;
-    appstr buf "call aqaml_alloc_block@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_alloc_block@PLT" ;
+    (* appstr buf "call aqaml_alloc_block@PLT" ; *)
     appstr buf "pop rdi" ;
     appstr buf "pop rsi" ;
     let exit_label = make_label () in
@@ -1115,7 +1139,8 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "push rdi" ;
     appstr buf "push rsi" ;
     appstr buf "mov rdi, rcx" ;
-    appstr buf "call aqaml_create_string_from_cstr@PLT" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_create_string_from_cstr@PLT" ;
+    (* appstr buf "call aqaml_create_string_from_cstr@PLT" ; *)
     appstr buf "mov rcx, rax" ;
     appstr buf "pop rsi" ;
     appstr buf "pop rdi" ;
