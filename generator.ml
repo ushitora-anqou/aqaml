@@ -954,7 +954,6 @@ let rec generate (letfuncs, strings, typedefs, exps) =
       | CTyPtr -> () ) ;
       appstr buf "ret" ; appstr buf ""
     in
-    gen_c_func "aqaml_malloc" [CTyInt] CTyPtr ;
     gen_c_func "aqaml_structural_equal" [CTyPtr; CTyPtr] CTyInt ;
     gen_c_func "aqaml_concat_string" [CTyPtr; CTyPtr] CTyPtr ;
     gen_c_func "aqaml_concat_list" [CTyPtr; CTyPtr] CTyPtr ;

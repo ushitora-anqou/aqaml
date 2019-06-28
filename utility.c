@@ -33,11 +33,6 @@ uint64_t aqaml_string_length_detail(uint64_t ptr);
 uint64_t aqaml_string_create_detail(uint64_t len);
 uint64_t aqaml_appcls_detail(uint64_t nargs, uint64_t cls_src, uint64_t *args);
 
-void *aqaml_malloc_detail(uint32_t size)
-{
-    return malloc(size);
-}
-
 AQamlValue get_value(uint64_t src)
 {
     if ((src & 1) == 1)
@@ -93,7 +88,21 @@ uint32_t aqaml_structural_equal_detail(uint64_t lhs_src, uint64_t rhs_src)
 
 uint64_t aqaml_alloc_block(uint64_t size, uint64_t color, uint64_t tag)
 {
-    uint64_t *ptr = aqaml_malloc_detail((size + 1) * 8);
+    static const uint64_t HEAP_SIZE = 1024 * 1024 * 1024;  // 1512MiB
+    static uint8_t *heap_ptr = NULL, *heap_limit = NULL;
+    if (heap_ptr == NULL) {  // initialize
+        heap_ptr = (uint8_t *)malloc(HEAP_SIZE);
+        assert(heap_ptr != NULL);
+        // for (uint64_t i = 0; i < HEAP_SIZE / 8; i++)
+        //    *((uint64_t *)heap_ptr + i) = 0xDEADBEEFll;
+        heap_limit = heap_ptr + HEAP_SIZE;
+    }
+
+    uint64_t needed_nbytes = (size + 1) * 8;
+    assert(heap_ptr + needed_nbytes < heap_limit);
+
+    uint64_t *ptr = (uint64_t *)heap_ptr;
+    heap_ptr += needed_nbytes;
     // size in word (54 bits) | color (2 bits) | tag byte (8 bits)
     *ptr = (size << 10) | (color << 8) | tag;
     return (uint64_t)(ptr + 1);
