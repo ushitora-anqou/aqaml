@@ -450,7 +450,7 @@ uint64_t aqaml_printf_ksprintf_detail(uint64_t callback_src, uint64_t fmt_src)
     if (functable[cnt] == 0)
         return aqaml_appcls_detail(1, callback_src, &fmt_src);
 
-    uint64_t ret_src = aqaml_alloc_block(3, 0, 247);
+    uint64_t ret_src = aqaml_alloc_block(4, 0, 247);
     AQamlValue ret = get_value(ret_src);
     ret.array->data[0] = functable[cnt];
     ret.array->data[1] = cnt;
