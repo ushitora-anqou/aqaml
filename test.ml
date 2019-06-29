@@ -668,6 +668,7 @@ let rec length lst =
 test (length [1; 2; 3]) 3 ;
 test (length []) 0
 
+
 ;;
 let nqueen n =
   let rec safe q qs =

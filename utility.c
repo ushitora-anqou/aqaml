@@ -7,7 +7,92 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern uint64_t aqaml_initial_rsp;
+////// struct Vector implementation from here
+
+typedef struct Vector Vector;
+struct Vector {
+    void **data;
+    size_t size, rsved_size;
+};
+
+Vector *new_vector(void)
+{
+    Vector *ret = (Vector *)malloc(sizeof(Vector));
+    ret->size = 0;
+    ret->rsved_size = 0;
+    ret->data = NULL;
+    return ret;
+}
+
+// NOTE: delete_vector() WILL NOT call free(3) for each element in the vector,
+//       since it doesn't know the actual content of each one.
+void delete_vector(Vector *vec)
+{
+    if (vec->data != NULL) free(vec->data);
+    free(vec);
+}
+
+void vector_push_back(Vector *vec, void *item)
+{
+    assert(vec != NULL);
+
+    if (vec->size == vec->rsved_size) {
+        vec->rsved_size = vec->rsved_size > 0 ? vec->rsved_size * 2 : 2;
+        // TODO: Use realloc(3), which somehow show an "Illegal instruction"
+        // error.
+        void **ndata = (void **)malloc(sizeof(void *) * vec->rsved_size);
+        if (vec->data != NULL) {
+            memcpy(ndata, vec->data, vec->size * sizeof(void *));
+            free(vec->data);
+        }
+        vec->data = ndata;
+    }
+
+    vec->data[vec->size++] = item;
+}
+
+void *vector_pop_back(Vector *vec)
+{
+    if (vec->size == 0) return NULL;
+    return vec->data[--vec->size];
+}
+
+void *vector_get(Vector *vec, size_t i)
+{
+    if (i >= vec->size) return NULL;
+    return vec->data[i];
+}
+
+size_t vector_size(Vector *vec)
+{
+    return vec->size;
+}
+
+void *vector_set(Vector *vec, size_t i, void *item)
+{
+    assert(vec != NULL && i < vector_size(vec));
+    vec->data[i] = item;
+    return item;
+}
+
+void vector_push_back_vector(Vector *vec, Vector *src)
+{
+    for (size_t i = 0; i < vector_size(src); i++)
+        vector_push_back(vec, vector_get(src, i));
+}
+
+void vector_sort(Vector *vec, int (*compar)(const void *, const void *))
+{
+    qsort(vec->data, vec->size, sizeof(void *), compar);
+}
+
+////// struct Vector implementation to here
+
+extern uint64_t aqaml_initial_rsp, aqaml_current_rsp;
+extern uint64_t aqaml_sys_argv;
+static Vector *malloced_regions = NULL;
+enum GC_COLOR { WHITE = 0, BLACK = 3, GRAY = 1, BLUE = 2 };
+static const int No_scan_tag = 251;
 
 typedef struct AQamlValue {
     enum {
@@ -88,25 +173,125 @@ uint32_t aqaml_structural_equal_detail(uint64_t lhs_src, uint64_t rhs_src)
     return 1;
 }
 
-uint64_t aqaml_alloc_block(uint64_t size, uint64_t color, uint64_t tag)
+int aqaml_gc_is_malloced(uint64_t value)
 {
-    static const uint64_t HEAP_SIZE = 1024 * 1024 * 1024;  // 1512MiB
-    static uint8_t *heap_ptr = NULL, *heap_limit = NULL;
-    if (heap_ptr == NULL) {  // initialize
-        heap_ptr = (uint8_t *)malloc(HEAP_SIZE);
-        assert(heap_ptr != NULL);
-        // for (uint64_t i = 0; i < HEAP_SIZE / 8; i++)
-        //    *((uint64_t *)heap_ptr + i) = 0xDEADBEEFll;
-        heap_limit = heap_ptr + HEAP_SIZE;
+    assert(malloced_regions != NULL);
+
+    if ((value & 1) == 1) return 0;  // integer
+
+    // [begin, end)
+    uint64_t begin = 0, end = vector_size(malloced_regions);
+    while (end - begin > 1) {
+        uint64_t mid = begin + (end - begin) / 2;
+        uint64_t t = (uint64_t)vector_get(malloced_regions, mid);
+        if (t <= value)
+            begin = mid;
+        else
+            end = mid;
     }
 
-    uint64_t needed_nbytes = (size + 1) * 8;
-    assert(heap_ptr + needed_nbytes < heap_limit);
+    return (uint64_t)vector_get(malloced_regions, begin) == value;
+}
 
-    uint64_t *ptr = (uint64_t *)heap_ptr;
-    heap_ptr += needed_nbytes;
+void aqaml_gc_mark_block(uint64_t *ptr)
+{
+    uint64_t size = ptr[0] >> 10, color = (ptr[0] >> 8) & 3,
+             tag = ptr[0] & 0xff;
+    if (color != WHITE) return;  // already scanned or partially scanned
+
+    if (tag > No_scan_tag) {  // opaque block
+        ptr[0] |= (3 << 8);
+        return;
+    }
+
+    // start marking this block
+    ptr[0] |= (1 << 8);  // make the color GRAY
+    for (uint64_t i = 0; i < size; i++) {
+        uint64_t elm = ptr[i + 1] - 8;
+        if (aqaml_gc_is_malloced(elm)) aqaml_gc_mark_block((uint64_t *)elm);
+    }
+    // end marking
+    ptr[0] |= (1 << 9);  // make the color BLACK
+}
+
+int aqaml_gc_compar_for_malloced_regions(const void *lhs, const void *rhs)
+{
+    if (*(uint64_t *)lhs < *(uint64_t *)rhs) return -1;
+    if (*(uint64_t *)rhs < *(uint64_t *)lhs) return 1;
+    return 0;
+}
+
+void aqaml_gc(void)
+{
+    if (aqaml_initial_rsp == 0) return;
+
+    assert(aqaml_current_rsp < aqaml_initial_rsp);
+    assert((aqaml_initial_rsp - aqaml_current_rsp) % 8 == 0);
+
+    vector_sort(malloced_regions, aqaml_gc_compar_for_malloced_regions);
+
+    // Let's mark.
+    // First, mark pointers on the stack.
+    uint64_t size = (aqaml_initial_rsp - aqaml_current_rsp) / 8;
+    for (uint64_t i = 0; i < size; i++) {
+        uint64_t elm = *(uint64_t *)(aqaml_current_rsp + i * 8) - 8;
+        if (aqaml_gc_is_malloced(elm))
+            // decrease for block's header
+            aqaml_gc_mark_block((uint64_t *)elm);
+    }
+    // Then, mark global pointers.
+    aqaml_gc_mark_block((uint64_t *)(aqaml_sys_argv - 8));
+
+    // Let's sweep.
+    Vector *new_malloced_regions = new_vector();
+    for (int i = 0; i < vector_size(malloced_regions); i++) {
+        uint64_t *ptr = (uint64_t *)vector_get(malloced_regions, i);
+        uint64_t color = (ptr[0] >> 8) & 3;
+        switch (color) {
+        case BLACK:  // marked
+            vector_push_back(new_malloced_regions, ptr);
+            break;
+        case WHITE:  // not marked i.e. should be freed
+            free(ptr);
+            break;
+        default:  // unreachable
+            assert(0);
+        }
+    }
+    delete_vector(malloced_regions);
+    malloced_regions = new_malloced_regions;
+
+    // clear color flags
+    for (uint64_t i = 0; i < vector_size(malloced_regions); i++) {
+        uint64_t *ptr = (uint64_t *)vector_get(malloced_regions, i);
+        ptr[0] &= 0xFFFFFCFF;  // make the color WHITE
+    }
+    *(uint64_t *)(aqaml_sys_argv - 8) &= 0xFFFFFCFF;  // make the color WHITE
+}
+
+uint64_t aqaml_alloc_block(uint64_t size, uint64_t color, uint64_t tag)
+{
+    if (malloced_regions == NULL) {  // initialize
+        malloced_regions = new_vector();
+        assert(malloced_regions != NULL);
+    }
+
+    static uint64_t gc_threshold = 100000;
+    if (vector_size(malloced_regions) > gc_threshold) {
+        // fprintf(stderr, "thr = %lu\t#regions = %d\t=> ", gc_threshold,
+        //        vector_size(malloced_regions));
+        aqaml_gc();
+        // fprintf(stderr, "%d\n", vector_size(malloced_regions));
+
+        gc_threshold *= 1.1;
+    }
+
+    uint64_t *ptr = (uint64_t *)malloc((size + 1) * 8);
+    vector_push_back(malloced_regions, ptr);
+
     // size in word (54 bits) | color (2 bits) | tag byte (8 bits)
     *ptr = (size << 10) | (color << 8) | tag;
+
     return (uint64_t)(ptr + 1);
 }
 
@@ -567,4 +752,12 @@ uint64_t aqaml_array_length_detail(uint64_t ary_src)
     AQamlValue ary = get_value(ary_src);
     assert(ary.kind == AQAML_ARRAY);
     return ary.array->header >> 10;
+}
+
+_Noreturn void aqaml_gracefully_exit(void)
+{
+    for (size_t i = 0; i < vector_size(malloced_regions); i++)
+        free(vector_get(malloced_regions, i));
+    delete_vector(malloced_regions);
+    exit(0);
 }

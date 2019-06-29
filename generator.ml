@@ -81,9 +81,11 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appfmt buf "%s:" exit_label ;
     Buffer.contents buf
   in
+  let save_rsp = "mov [rip + aqaml_current_rsp], rsp" in
   let rec gen_alloc_block size color tag =
     (* allocated block address is in rax *)
     let buf = Buffer.create 128 in
+    appstr buf save_rsp ;
     appfmt buf "mov rdi, %d" size ;
     appfmt buf "mov rsi, %d" color ;
     appfmt buf "mov rdx, %d" tag ;
@@ -948,6 +950,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     let buf = Buffer.create 512 in
     let gen_c_func funcname argument_types ret_type =
       appfmt buf "%s:" funcname ;
+      appstr buf save_rsp ;
       List.iteri
         (fun i -> function
           | CTyInt | CTyUnit -> appstr buf @@ untag_int @@ reg_of_index i
@@ -1018,6 +1021,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "ret" ;
     appstr buf "" ;
     appstr buf "aqaml_open_in:" ;
+    appstr buf save_rsp ;
     let exit_label = make_label () in
     appstr buf "mov rdi, rax" ;
     appstr buf @@ gen_call_with_aligned_rsp "aqaml_open_in_detail@PLT" ;
@@ -1117,7 +1121,6 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "" ;
     appstr buf ".global main" ;
     appstr buf "main:" ;
-    appstr buf "push rbp" ;
     appstr buf "mov rbp, rsp" ;
     (* handle command-line arguments *)
     appstr buf "push rsi" ;
@@ -1149,6 +1152,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appfmt buf "jmp %s" loop_label ;
     appfmt buf "%s:" exit_label ;
     appstr buf ".data" ;
+    appstr buf ".global aqaml_sys_argv" ;
     appstr buf "aqaml_sys_argv:" ;
     appstr buf ".space 8" ;
     appstr buf ".text" ;
@@ -1160,7 +1164,11 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "mov r14, rsp" ;
     (* set start address of stack *)
     appstr buf ".data" ;
+    appstr buf ".global aqaml_initial_rsp" ;
     appstr buf "aqaml_initial_rsp:" ;
+    appstr buf ".zero 8" ;
+    appstr buf ".global aqaml_current_rsp" ;
+    appstr buf "aqaml_current_rsp:" ;
     appstr buf ".zero 8" ;
     appstr buf ".text" ;
     appstr buf "mov [rip + aqaml_initial_rsp], rsp" ;
@@ -1169,9 +1177,7 @@ let rec generate (letfuncs, strings, typedefs, exps) =
     appstr buf "call aqaml_main" ;
     appstr buf "pop rax" ;
     appstr buf "pop rax" ;
-    appstr buf "mov rax, 0" ;
-    appstr buf "pop rbp" ;
-    appstr buf "ret" ;
+    appstr buf @@ gen_call_with_aligned_rsp "aqaml_gracefully_exit@PLT" ;
     appstr buf "aqaml_default_exception_handler:" ;
     appfmt buf "mov rax, %d" @@ tagged_int 1 ;
     appstr buf "call aqaml_exit" ;

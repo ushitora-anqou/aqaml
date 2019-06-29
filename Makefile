@@ -7,7 +7,7 @@ test: aqaml test.sh utility.o
 	./test.sh
 
 utility.o: utility.c
-	gcc -Wall -std=c11 -c -o $@ $^
+	gcc -Wall -std=c11 -O0 -g3 -c -o $@ $^
 
 _self_aqaml: stdlib.ml $(SRC) utility.o aqaml
 	./aqaml stdlib.ml $(SRC) > _self_aqaml.s
