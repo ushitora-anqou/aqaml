@@ -8,10 +8,10 @@ with an also tiny standard library.
 - AQaml is a self-hosted OCaml compiler i.e. AQaml can compile the source code of itself.
 - AQaml has basic arithmetic operations, basic control expressions,
 string, lists, tuples, records, variants, pattern matching,
-recursive functions, closures, mutual recursion, references, etc.
+recursive functions, closures, mutual recursion, references, GC, etc.
 - For now AQaml **doesn't** have currying, (complete) module system,
-GC, type inference, class and many other features that are very important
-but aren't needed to complete self-hosting.
+type inference, class and many other features that are very important
+but aren't necessary for self-hosting.
 
 ## To Build and Test
 
